@@ -1,0 +1,15 @@
+diff --git a/dist/index.js b/dist/index.js
+index e7e087bcb6f29d0d8f36cd558e0183bc0f162fcb..df93c10469a110f70db00df5e8626823d54de366 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -7352,7 +7352,9 @@ function layoutSequenceDiagram(diagram, _options = {}) {
+     width: actorWidths[i],
+     height: SEQ.actorHeight
+   }));
+-  let messageY = actorY + SEQ.actorHeight + SEQ.headerGap;
++  const hasActorIcon = diagram.actors.some((a) => a.type === "actor");
++  const actorLabelExtra = hasActorIcon ? FONT_SIZES.nodeLabel + 14 : 0;
++  let messageY = actorY + SEQ.actorHeight + SEQ.headerGap + actorLabelExtra;
+   const messages = [];
+   const extraSpaceBefore = /* @__PURE__ */ new Map();
+   for (const block of diagram.blocks) {
