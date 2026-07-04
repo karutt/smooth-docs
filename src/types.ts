@@ -11,6 +11,7 @@ export type DocPage = {
   title: string;
   url: string;
   sourcePath: string;
+  absolutePath: string;
   markdown: string;
   html: string;
   text: string;

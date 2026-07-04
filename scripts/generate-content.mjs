@@ -5,6 +5,7 @@ import fg from "fast-glob";
 import matter from "gray-matter";
 import { renderMermaidSVG } from "beautiful-mermaid";
 import hljs from "highlight.js";
+import katex from "katex";
 import MarkdownIt from "markdown-it";
 import { loadSmoothDocsConfig } from "./config.mjs";
 
@@ -69,6 +70,7 @@ for (const relativePath of markdownFiles.sort()) {
     title,
     url: route,
     sourcePath: `${site}/docs/${relativePath}`,
+    absolutePath,
     markdown: raw,
     html,
     text: plainText(markdown),
@@ -83,6 +85,7 @@ if (pages.length === 0) {
     title: siteTitle,
     url: "/",
     sourcePath: `${site}/docs/index.md`,
+    absolutePath: path.join(sourceDir, "index.md"),
     markdown,
     html: renderMarkdown(markdown, { pageDir: "" }),
     text: plainText(markdown),
@@ -265,6 +268,13 @@ function renderMarkdown(markdown, env) {
     }
     return `${renderHighlightedCodeBlock(token.content, token.info)}\n`;
   };
+
+  md.block.ruler.before("fence", "math_block", mathBlockRule, {
+    alt: ["paragraph", "reference", "blockquote", "list"],
+  });
+  md.renderer.rules.math_block = (tokens, index) => `${renderMathBlock(tokens[index].content)}\n`;
+  md.inline.ruler.after("escape", "math_inline", mathInlineRule);
+  md.renderer.rules.math_inline = (tokens, index) => renderMathInline(tokens[index].content);
 
   const defaultImage =
     md.renderer.rules.image ||
@@ -629,6 +639,110 @@ function isFenceLine(line) {
   return /^ {0,3}(```|~~~)/.test(line);
 }
 
+function isMathFenceLine(line) {
+  return /^ {0,3}\$\$\s*$/.test(line);
+}
+
+function mathBlockRule(state, startLine, endLine, silent) {
+  const start = state.bMarks[startLine] + state.tShift[startLine];
+  const max = state.eMarks[startLine];
+  const opener = state.src.slice(start, max);
+  if (!isMathFenceLine(opener)) return false;
+  if (silent) return true;
+
+  let nextLine = startLine + 1;
+  let contentEndLine = endLine;
+  let hasClosingFence = false;
+
+  for (; nextLine < endLine; nextLine += 1) {
+    const lineStart = state.bMarks[nextLine] + state.tShift[nextLine];
+    const lineMax = state.eMarks[nextLine];
+    const line = state.src.slice(lineStart, lineMax);
+    if (isMathFenceLine(line)) {
+      contentEndLine = nextLine;
+      hasClosingFence = true;
+      nextLine += 1;
+      break;
+    }
+  }
+
+  const token = state.push("math_block", "math", 0);
+  token.block = true;
+  token.content = state.getLines(startLine + 1, contentEndLine, state.blkIndent, true);
+  token.map = [startLine, hasClosingFence ? nextLine : contentEndLine];
+  state.line = hasClosingFence ? nextLine : endLine;
+  return true;
+}
+
+function isValidMathInlineDelim(state, pos) {
+  const max = state.posMax;
+  const prevChar = pos > 0 ? state.src.charCodeAt(pos - 1) : -1;
+  const nextChar = pos + 1 <= max ? state.src.charCodeAt(pos + 1) : -1;
+
+  let canOpen = true;
+  let canClose = true;
+
+  // A closing "$" must not sit right after whitespace or right before a digit
+  // (so plain currency like "$5" and "5 $" is left untouched).
+  if (prevChar === 0x20 || prevChar === 0x09 || (nextChar >= 0x30 && nextChar <= 0x39)) {
+    canClose = false;
+  }
+  if (nextChar === 0x20 || nextChar === 0x09) {
+    canOpen = false;
+  }
+
+  return { canOpen, canClose };
+}
+
+function mathInlineRule(state, silent) {
+  if (state.src[state.pos] !== "$") return false;
+
+  const open = isValidMathInlineDelim(state, state.pos);
+  if (!open.canOpen) {
+    if (!silent) state.pending += "$";
+    state.pos += 1;
+    return true;
+  }
+
+  // Skip properly escaped "$" until an unescaped closing delimiter is found.
+  const start = state.pos + 1;
+  let match = start;
+  while ((match = state.src.indexOf("$", match)) !== -1) {
+    let pos = match - 1;
+    while (state.src[pos] === "\\") pos -= 1;
+    if ((match - pos) % 2 === 1) break;
+    match += 1;
+  }
+
+  if (match === -1) {
+    if (!silent) state.pending += "$";
+    state.pos = start;
+    return true;
+  }
+
+  if (match - start === 0) {
+    if (!silent) state.pending += "$$";
+    state.pos = start + 1;
+    return true;
+  }
+
+  const close = isValidMathInlineDelim(state, match);
+  if (!close.canClose) {
+    if (!silent) state.pending += "$";
+    state.pos = start;
+    return true;
+  }
+
+  if (!silent) {
+    const token = state.push("math_inline", "math", 0);
+    token.markup = "$";
+    token.content = state.src.slice(start, match);
+  }
+
+  state.pos = match + 1;
+  return true;
+}
+
 function normalizeHighlightLanguage(value) {
   const raw = value?.trim().split(/\s+/)[0]?.toLowerCase();
   if (!raw) return null;
@@ -685,6 +799,46 @@ function renderCodeBlock({ code, language }) {
     `<pre class="hljs ${languageClass}"><code class="${languageClass}">${code}</code></pre>`,
     `</figure>`,
   ].join("");
+}
+
+function renderMathBlock(source) {
+  const cleanSource = source.trim();
+  const safeSource = escapeAttr(cleanSource);
+
+  if (!cleanSource) {
+    return `<figure class="docs-math-block" data-math-source="${safeSource}"><div class="docs-math-placeholder">Empty equation</div></figure>`;
+  }
+
+  const html = katex.renderToString(normalizeKatexCompatibleSource(cleanSource), {
+    displayMode: true,
+    output: "html",
+    strict: false,
+    throwOnError: false,
+  });
+  return `<figure class="docs-math-block" data-math-source="${safeSource}">${html}</figure>`;
+}
+
+function renderMathInline(source) {
+  const cleanSource = source.trim();
+  const safeSource = escapeAttr(cleanSource);
+
+  if (!cleanSource) {
+    return `<span class="docs-math-inline" data-math-source="${safeSource}"></span>`;
+  }
+
+  const html = katex.renderToString(normalizeKatexCompatibleSource(cleanSource), {
+    displayMode: false,
+    output: "html",
+    strict: false,
+    throwOnError: false,
+  });
+  return `<span class="docs-math-inline" data-math-source="${safeSource}">${html}</span>`;
+}
+
+function normalizeKatexCompatibleSource(source) {
+  return source
+    .replace(/\\begin\{eqnarray\*?\}/g, "\\begin{aligned}")
+    .replace(/\\end\{eqnarray\*?\}/g, "\\end{aligned}");
 }
 
 function buildNav(pageList) {

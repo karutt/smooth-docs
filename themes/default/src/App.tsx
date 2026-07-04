@@ -94,6 +94,7 @@ import type { AllDocsData, DocPage, DocsData, NavItem, SiteKey } from "@/types";
 import { cn } from "@/lib/utils";
 import hljs from "highlight.js/lib/core";
 import markdown from "highlight.js/lib/languages/markdown";
+import "katex/dist/katex.min.css";
 import { toast } from "sonner";
 
 hljs.registerLanguage("markdown", markdown);
@@ -553,8 +554,8 @@ export function App() {
     }, [currentPage.markdown]);
 
     const copyCurrentPagePath = React.useCallback(() => {
-        void copyWithToast(currentPage.sourcePath, "Copied page path.");
-    }, [currentPage.sourcePath]);
+        void copyWithToast(currentPage.absolutePath, "Copied page path.");
+    }, [currentPage.absolutePath]);
 
     const copyCurrentUrl = React.useCallback(() => {
         void copyWithToast(location.href, "Copied current URL.");
@@ -3137,7 +3138,7 @@ function PageHeader({
                                     </DropdownMenuItem>
                                     <DropdownMenuItem
                                         onSelect={() => {
-                                            void copyWithToast(page.sourcePath, "Copied page path.");
+                                            void copyWithToast(page.absolutePath, "Copied page path.");
                                         }}>
                                         <Folder className='h-3.5 w-3.5 text-muted-foreground' />
                                         Path

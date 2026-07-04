@@ -552,6 +552,26 @@
         background-color: hsl(var(--docs-mermaid-background));
     }
 
+    .docs-prose .docs-math-block {
+        @apply my-6 overflow-x-auto rounded-md border bg-card p-4 text-card-foreground;
+    }
+
+    .docs-prose .docs-math-block .katex-display {
+        margin: 0;
+    }
+
+    .docs-prose .docs-math-placeholder {
+        @apply font-mono text-sm text-muted-foreground;
+    }
+
+    .docs-prose .docs-math-inline {
+        @apply inline-block align-middle;
+    }
+
+    .docs-prose .docs-math-inline .katex {
+        white-space: normal;
+    }
+
     .docs-prose .docs-mermaid-zoomable {
         @apply cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
     }
