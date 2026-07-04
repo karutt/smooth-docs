@@ -16,8 +16,14 @@ export function loadSmoothDocsConfig(options = {}) {
   const docsDir = path.resolve(projectDir, rawConfig.docs_dir ?? rawConfig.docsDir ?? "docs");
   const siteKey = normalizeSiteKey(rawConfig.site_key ?? rawConfig.siteKey ?? defaultSiteKey);
   const siteName = String(rawConfig.site_name ?? rawConfig.siteName ?? path.basename(projectDir));
+  const devPort = normalizeDevPort(rawConfig.dev_port ?? rawConfig.devPort ?? rawConfig.port);
   const themeConfig = normalizeThemeConfig(rawConfig.theme);
   const theme = resolveTheme({ kitRoot, projectDir, themeConfig });
+
+  // Namespace the aggregated ".generated/all" output by site_key so that two
+  // projects served from the same kit checkout can never overwrite each other's
+  // generated content (they resolve to distinct directories).
+  const generatedAllDir = path.join(kitRoot, ".generated", "all", siteKey);
 
   return {
     kitRoot,
@@ -26,6 +32,8 @@ export function loadSmoothDocsConfig(options = {}) {
     docsDir,
     siteKey,
     siteName,
+    devPort,
+    generatedAllDir,
     theme,
   };
 }
@@ -128,6 +136,15 @@ function firstExistingPath(paths) {
   }
 
   return null;
+}
+
+function normalizeDevPort(value) {
+  if (value === undefined || value === null || value === "") return 8100;
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid dev_port: ${value}`);
+  }
+  return port;
 }
 
 function normalizeSiteKey(value) {

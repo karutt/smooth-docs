@@ -16,6 +16,8 @@ export type SmoothDocsConfig = {
   docsDir: string;
   siteKey: string;
   siteName: string;
+  devPort: number;
+  generatedAllDir: string;
   theme: SmoothDocsTheme;
 };
 

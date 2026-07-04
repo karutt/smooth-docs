@@ -101,7 +101,7 @@ const docsData = {
   siteTitle,
   oppositeSite,
   devPorts: {
-    [site]: 8100,
+    [site]: config.devPort,
   },
   pages: pages.map(({ order, relativePath, ...page }) => page),
   nav: buildNav(pages),

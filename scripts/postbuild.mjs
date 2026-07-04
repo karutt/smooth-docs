@@ -6,7 +6,7 @@ import { loadSmoothDocsConfig } from "./config.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const config = loadSmoothDocsConfig({ kitRoot: rootDir });
-const generatedPath = path.join(rootDir, ".generated", "all", "docs-data.ts");
+const generatedPath = path.join(config.generatedAllDir, "docs-data.ts");
 const distDir = path.resolve(rootDir, process.argv[2] ?? "dist");
 
 const generated = await fs.readFile(generatedPath, "utf8");

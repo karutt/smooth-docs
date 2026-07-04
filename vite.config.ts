@@ -59,7 +59,7 @@ function generateDocsContent() {
 }
 
 function readGeneratedDocsData(): AllDocsData {
-  const generatedPath = path.resolve(__dirname, ".generated/all/docs-data.ts");
+  const generatedPath = path.join(docsConfig.generatedAllDir, "docs-data.ts");
   const generated = readFileSync(generatedPath, "utf8");
   const jsonMatch = generated.match(
     /export const docsDataBySite: Record<SiteKey, DocsData> = ([\s\S]*);\n$/,
@@ -622,8 +622,8 @@ export default defineConfig({
       "@": docsConfig.theme.sourceDir,
       "#smooth-docs-theme": docsConfig.theme.sourceDir,
       "#smooth-docs/types": path.resolve(__dirname, "src/types.ts"),
-      "#docs-data": path.resolve(__dirname, ".generated/all/docs-data.ts"),
+      "#docs-data": path.join(docsConfig.generatedAllDir, "docs-data.ts"),
     },
   },
-  publicDir: path.resolve(__dirname, ".generated/all/public"),
+  publicDir: path.join(docsConfig.generatedAllDir, "public"),
 });

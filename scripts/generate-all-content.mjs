@@ -7,7 +7,7 @@ import { loadSmoothDocsConfig } from "./config.mjs";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
 const config = loadSmoothDocsConfig({ kitRoot: rootDir });
-const allGeneratedDir = path.join(rootDir, ".generated", "all");
+const allGeneratedDir = config.generatedAllDir;
 const allPublicDir = path.join(allGeneratedDir, "public", "docs-assets");
 const themePublicDir = path.join(allGeneratedDir, "public", "theme");
 const allSites = [config.siteKey];

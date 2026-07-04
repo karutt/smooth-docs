@@ -61,8 +61,10 @@ async function serveProject(rawArgs) {
   const options = parseArgs(rawArgs);
   const projectDir = path.resolve(options.positionals[0] ?? ".");
   const host = String(options.host ?? "127.0.0.1");
-  const port = String(options.port ?? "8100");
-  loadSmoothDocsConfig({ kitRoot, projectDir });
+  const config = loadSmoothDocsConfig({ kitRoot, projectDir });
+  // Default to the project's configured dev_port (falls back to 8100) so that
+  // distinct projects don't all contend for the same port.
+  const port = String(options.port ?? config.devPort);
 
   await runNode([viteBinPath(), "--host", host, "--port", port], {
     SMOOTH_DOCS_PROJECT_DIR: projectDir,
