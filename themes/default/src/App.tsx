@@ -2,13 +2,17 @@ import * as React from "react";
 import { docsDataBySite as initialDocsDataBySite } from "#docs-data";
 import {
     BookOpen,
+    CheckCircle2,
     ChevronRight,
+    Circle,
     Code2,
     Command as CommandIcon,
     Copy,
     Eye,
     FileText,
     Folder,
+    FolderPlus,
+    Inbox,
     Layout,
     Link as LinkIcon,
     Maximize2,
@@ -70,6 +74,15 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Toaster } from "@/components/ui/sonner";
 import { Switch } from "@/components/ui/switch";
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
 import {
     Sidebar as SidebarRoot,
     SidebarContent,
@@ -148,6 +161,25 @@ type PinMenuRequest = {
     };
 };
 
+type DocsEntryTarget = {
+    title: string;
+    kind: "page" | "folder" | "root" | "selection";
+    url: string;
+    sourcePath?: string;
+    sourcePaths?: string[];
+    folderPath?: string;
+    system?: "inbox";
+};
+
+type InboxPageItem = NonNullable<DocPage["inbox"]>["items"][number];
+type FolderPageItem = NonNullable<DocPage["folder"]>["items"][number];
+
+type DocsEntryContextMenuRequest = {
+    x: number;
+    y: number;
+    target: DocsEntryTarget;
+};
+
 type PinToastState = {
     id: number;
     message: string;
@@ -173,9 +205,48 @@ type CreateMarkdownResult = {
     generatedAt?: number;
 };
 
+type CreateDocsEntryResult = {
+    kind: "file" | "folder";
+    sourcePath: string;
+    folderPath?: string;
+    site: SiteKey;
+    url: string;
+    docsDataBySite?: AllDocsData;
+    generatedAt?: number;
+};
+
 type DeleteMarkdownResult = {
     sourcePath: string;
     site: SiteKey;
+    docsDataBySite?: AllDocsData;
+    generatedAt?: number;
+};
+
+type MoveMarkdownResult = {
+    site: SiteKey;
+    moved: Array<{
+        sourcePath: string;
+        destinationPath: string;
+        url: string;
+    }>;
+    docsDataBySite?: AllDocsData;
+    generatedAt?: number;
+};
+
+type RenameDocsEntryResult = {
+    site: SiteKey;
+    renamed: Array<{
+        sourcePath: string;
+        destinationPath: string;
+        url: string;
+    }>;
+    docsDataBySite?: AllDocsData;
+    generatedAt?: number;
+};
+
+type DeleteDocsEntryResult = {
+    site: SiteKey;
+    deleted: string[];
     docsDataBySite?: AllDocsData;
     generatedAt?: number;
 };
@@ -188,9 +259,7 @@ type SaveMarkdownResult = {
 type EditorSaveStatus = "saved" | "dirty" | "saving" | "error";
 
 type MainWidthSetting = "narrow" | "default" | "wide" | "full";
-type DensitySetting = "compact" | "comfortable" | "spacious";
 type CodeFontFamilySetting = "mono" | "system" | "serif";
-type CodeFontSizeSetting = "12" | "13" | "14" | "15" | "16";
 type EditorFontSizeSetting =
     | "10"
     | "11"
@@ -217,15 +286,38 @@ type CodeThemeSetting =
     | "night-owl"
     | "nord"
     | "monokai"
+    | "dracula"
     | "quiet-light"
     | "solarized-light"
     | "xcode-light";
 type MermaidDensitySetting = "compact" | "comfortable" | "spacious";
 type SettingsSectionId = "general" | "layout" | "sidebar" | "code" | "editor" | "diagrams";
 
+type DocsThemeOption = {
+    name: string;
+    title: string;
+    extends?: string;
+    requiresRestart: boolean;
+};
+
+type DocsThemeSettingsState = {
+    currentTheme: string;
+    themes: DocsThemeOption[];
+    loading: boolean;
+    applying: boolean;
+    error: string;
+};
+
+type DocsThemeSettingsPayload = {
+    currentTheme?: string;
+    themes?: DocsThemeOption[];
+    requiresRestart?: boolean;
+    error?: string;
+} & Partial<DocsContentUpdatePayload>;
+
 type DocsUiSettings = {
     mainWidth: MainWidthSetting;
-    density: DensitySetting;
+    articleFontScale: number;
     autoHideHeader: boolean;
     showBreadcrumbs: boolean;
     reduceMotion: boolean;
@@ -235,7 +327,6 @@ type DocsUiSettings = {
     showRightSidebar: boolean;
     codeTheme: CodeThemeSetting;
     codeFontFamily: CodeFontFamilySetting;
-    codeFontSize: CodeFontSizeSetting;
     codeLineHeight: CodeLineHeightSetting;
     codeWrap: boolean;
     codeMaxHeight: CodeMaxHeightSetting;
@@ -251,6 +342,8 @@ type Size = {
 
 const PIN_STORAGE_KEY = "smooth-docs-kit-pin-blocks";
 const UI_SETTINGS_STORAGE_KEY = "smooth-docs-kit-ui-settings";
+const READ_PAGES_STORAGE_PREFIX = "smooth-docs-kit-read-pages";
+const DOCS_DRAG_MIME = "application/x-smooth-docs-source-paths";
 const PIN_FONT_STEP_KEY = "smooth-docs-kit-pin-font-step";
 const PIN_PANEL_WIDTH_KEY = "smooth-docs-kit-pin-panel-width";
 const LEFT_SIDEBAR_WIDTH_KEY = "smooth-docs-kit-left-sidebar-width";
@@ -266,6 +359,10 @@ const DEFAULT_PIN_PANEL_WIDTH = 400;
 const MIN_PIN_PANEL_WIDTH = 320;
 const MAX_PIN_PANEL_WIDTH = 760;
 const DEFAULT_PIN_FONT_STEP_INDEX = 6;
+const MIN_ARTICLE_FONT_SCALE = 85;
+const MAX_ARTICLE_FONT_SCALE = 125;
+const ARTICLE_FONT_SCALE_STEP = 5;
+const DEFAULT_ARTICLE_FONT_SCALE = 100;
 const PINNABLE_TAGS = new Set([
     "TABLE",
     "UL",
@@ -303,7 +400,7 @@ const EDITOR_FONT_SIZE_OPTIONS: EditorFontSizeSetting[] = [
 
 const DEFAULT_UI_SETTINGS: DocsUiSettings = {
     mainWidth: "default",
-    density: "comfortable",
+    articleFontScale: DEFAULT_ARTICLE_FONT_SCALE,
     autoHideHeader: true,
     showBreadcrumbs: true,
     reduceMotion: false,
@@ -313,7 +410,6 @@ const DEFAULT_UI_SETTINGS: DocsUiSettings = {
     showRightSidebar: true,
     codeTheme: "github-dark",
     codeFontFamily: "mono",
-    codeFontSize: "14",
     codeLineHeight: "normal",
     codeWrap: false,
     codeMaxHeight: "640",
@@ -332,6 +428,7 @@ const CODE_THEME_OPTIONS: Array<{
     { value: "night-owl", label: "Night Owl", colorScheme: "dark" },
     { value: "nord", label: "Nord", colorScheme: "dark" },
     { value: "monokai", label: "Monokai", colorScheme: "dark" },
+    { value: "dracula", label: "Dracula", colorScheme: "dark" },
     { value: "github-light", label: "GitHub Light", colorScheme: "light" },
     { value: "atom-one-light", label: "Atom One Light", colorScheme: "light" },
     { value: "quiet-light", label: "Quiet Light", colorScheme: "light" },
@@ -372,6 +469,9 @@ export function App() {
     const [settingsOpen, setSettingsOpen] = React.useState(false);
     const [promoteDraftOpen, setPromoteDraftOpen] = React.useState(false);
     const [createMarkdownOpen, setCreateMarkdownOpen] = React.useState(false);
+    const [createMarkdownFolderPath, setCreateMarkdownFolderPath] = React.useState<string | null>(
+        null,
+    );
     const [deleteMarkdownOpen, setDeleteMarkdownOpen] = React.useState(false);
     const [editMode, setEditMode] = React.useState(false);
     const [editorText, setEditorText] = React.useState("");
@@ -380,6 +480,13 @@ export function App() {
     const [editorSavedAt, setEditorSavedAt] = React.useState<number | null>(null);
     const [theme, setTheme] = React.useState<Theme>(() => getInitialTheme());
     const [uiSettings, setUiSettings] = React.useState<DocsUiSettings>(() => readUiSettings());
+    const [docsThemeState, setDocsThemeState] = React.useState<DocsThemeSettingsState>({
+        currentTheme: "",
+        themes: [],
+        loading: false,
+        applying: false,
+        error: "",
+    });
     const [headerVisible, setHeaderVisible] = React.useState(true);
     const [zenMode, setZenMode] = React.useState(false);
     const [sidebarOpen, setSidebarOpen] = React.useState(true);
@@ -392,6 +499,13 @@ export function App() {
         initialDocsDataBySite[fallbackSite];
     const currentPage =
         docsData.pages.find((page) => page.url === route.pagePath) ?? docsData.pages[0];
+    const [readPageUrls, setReadPageUrls] = React.useState<ReadonlySet<string>>(() =>
+        readReadPageUrls(route.site),
+    );
+    const [selectedSourcePaths, setSelectedSourcePaths] = React.useState<ReadonlySet<string>>(
+        () => new Set<string>(),
+    );
+    const [lastSelectedSourcePath, setLastSelectedSourcePath] = React.useState<string | null>(null);
     const pinPageKey = React.useMemo(
         () => getPinPageKey(route.site, currentPage.url),
         [currentPage.url, route.site],
@@ -400,6 +514,13 @@ export function App() {
         readPinnedBlocks(pinPageKey),
     );
     const [pinMenu, setPinMenu] = React.useState<PinMenuRequest | null>(null);
+    const [docsEntryMenu, setDocsEntryMenu] =
+        React.useState<DocsEntryContextMenuRequest | null>(null);
+    const [createFolderTarget, setCreateFolderTarget] = React.useState<DocsEntryTarget | null>(
+        null,
+    );
+    const [renameTarget, setRenameTarget] = React.useState<DocsEntryTarget | null>(null);
+    const [deleteTarget, setDeleteTarget] = React.useState<DocsEntryTarget | null>(null);
     const [pinToast, setPinToast] = React.useState<PinToastState | null>(null);
     const [pinFontStepIndex, setPinFontStepIndex] = React.useState(() => readPinFontStepIndex());
     const [pinPanelWidth, setPinPanelWidth] = React.useState(() => readPinPanelWidth());
@@ -414,6 +535,14 @@ export function App() {
         () => new Set(docsData.pages.map((page) => page.url)),
         [docsData.pages],
     );
+    const inboxUnreadCount = React.useMemo(
+        () => countUnreadInboxItems(docsData.pages, readPageUrls),
+        [docsData.pages, readPageUrls],
+    );
+    const selectableSourcePaths = React.useMemo(
+        () => flattenNavPageSourcePaths(docsData.nav),
+        [docsData.nav],
+    );
     const tableOfContents = React.useMemo(
         () => extractTableOfContents(currentPage.html),
         [currentPage.html],
@@ -424,7 +553,8 @@ export function App() {
     );
     const hasPinnedBlocks = pinnedBlocks.length > 0;
     const hasSidePanel = hasPinnedBlocks || tableOfContents.length > 0;
-    const canEditMarkdown = isDocsMarkdownSourcePath(currentPage.sourcePath);
+    const canEditMarkdown =
+        currentPage.kind === "page" && isDocsMarkdownSourcePath(currentPage.sourcePath);
     const canRenderSidePanel = !zenMode && !editMode && hasSidePanel;
     const rightSidebarOpen = canRenderSidePanel && uiSettings.showRightSidebar;
 
@@ -432,6 +562,37 @@ export function App() {
         setPinnedBlocks(readPinnedBlocks(pinPageKey));
         setPinMenu(null);
     }, [pinPageKey]);
+
+    React.useEffect(() => {
+        setReadPageUrls(readReadPageUrls(route.site));
+        setSelectedSourcePaths(new Set<string>());
+        setLastSelectedSourcePath(null);
+    }, [route.site]);
+
+    React.useEffect(() => {
+        if (isDocsMarkdownSourcePath(currentPage.sourcePath)) return;
+
+        setSelectedSourcePaths(new Set<string>());
+        setLastSelectedSourcePath(null);
+    }, [currentPage.sourcePath]);
+
+    React.useEffect(() => {
+        if (currentPage.kind !== "page") return;
+        markPageAsRead(route.site, currentPage.url, setReadPageUrls);
+    }, [currentPage.kind, currentPage.url, route.site]);
+
+    React.useEffect(() => {
+        const available = new Set(selectableSourcePaths);
+
+        setSelectedSourcePaths((current) => {
+            const next = new Set([...current].filter((sourcePath) => available.has(sourcePath)));
+            return next.size === current.size ? current : next;
+        });
+
+        setLastSelectedSourcePath((current) =>
+            current && available.has(current) ? current : null,
+        );
+    }, [selectableSourcePaths]);
 
     const applyDocsContentUpdate = React.useCallback((payload: DocsContentUpdatePayload) => {
         if (payload.docsDataBySite) {
@@ -450,6 +611,106 @@ export function App() {
         hot.on("smooth-docs:content-update", applyDocsContentUpdate);
         return () => hot.off("smooth-docs:content-update", applyDocsContentUpdate);
     }, [applyDocsContentUpdate]);
+
+    const loadDocsThemes = React.useCallback(async () => {
+        setDocsThemeState((current) => ({ ...current, loading: true, error: "" }));
+
+        try {
+            const response = await fetch("/__smooth-docs/themes", { method: "GET" });
+            const data = (await response.json().catch(() => ({}))) as DocsThemeSettingsPayload;
+
+            if (response.status === 404) {
+                setDocsThemeState((current) => ({
+                    ...current,
+                    loading: false,
+                    error: "Theme switching is unavailable in this server.",
+                }));
+                return;
+            }
+
+            if (!response.ok) {
+                throw new Error(data.error ?? "Failed to load themes");
+            }
+
+            setDocsThemeState((current) => ({
+                ...current,
+                currentTheme: data.currentTheme ?? current.currentTheme,
+                themes: data.themes ?? current.themes,
+                loading: false,
+                error: "",
+            }));
+        } catch (error) {
+            setDocsThemeState((current) => ({
+                ...current,
+                loading: false,
+                error: error instanceof Error ? error.message : "Failed to load themes",
+            }));
+        }
+    }, []);
+
+    React.useEffect(() => {
+        if (!settingsOpen) return;
+        void loadDocsThemes();
+    }, [loadDocsThemes, settingsOpen]);
+
+    const changeDocsTheme = React.useCallback(
+        async (themeName: string) => {
+            if (!themeName || docsThemeState.applying) return;
+
+            setDocsThemeState((current) => ({
+                ...current,
+                currentTheme: themeName,
+                applying: true,
+                error: "",
+            }));
+
+            try {
+                const response = await fetch("/__smooth-docs/theme", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ theme: themeName }),
+                });
+                const data = (await response.json().catch(() => ({}))) as DocsThemeSettingsPayload;
+
+                if (response.status === 404) {
+                    throw new Error("Theme switching is unavailable in this server.");
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? "Failed to change theme");
+                }
+
+                if (data.docsDataBySite || data.refreshThemeStylesheet) {
+                    applyDocsContentUpdate(data);
+                }
+
+                setDocsThemeState((current) => ({
+                    ...current,
+                    currentTheme: data.currentTheme ?? themeName,
+                    themes: data.themes ?? current.themes,
+                    applying: false,
+                    error: "",
+                }));
+
+                if (data.requiresRestart) {
+                    toast.message("Restart the dev server to finish switching this theme.");
+                } else {
+                    toast.success("Docs theme changed.");
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Failed to change theme";
+                setDocsThemeState((current) => ({
+                    ...current,
+                    applying: false,
+                    error: message,
+                }));
+                toast.error("Theme change failed.", {
+                    description: message,
+                });
+            }
+        },
+        [applyDocsContentUpdate, docsThemeState.applying],
+    );
 
     React.useEffect(() => {
         const nextDocsData = liveDocsDataBySite[route.site] ?? liveDocsDataBySite[fallbackSite];
@@ -505,6 +766,319 @@ export function App() {
         [route.site],
     );
 
+    const selectPageSourcePath = React.useCallback(
+        (
+            sourcePath: string,
+            modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
+        ) => {
+            const commandKey = Boolean(modifiers.metaKey || modifiers.ctrlKey);
+            const shiftKey = Boolean(modifiers.shiftKey);
+
+            setSelectedSourcePaths((current) => {
+                if (shiftKey && lastSelectedSourcePath) {
+                    const range = sourcePathRange(
+                        selectableSourcePaths,
+                        lastSelectedSourcePath,
+                        sourcePath,
+                    );
+                    if (range.length > 0) {
+                        return commandKey ? new Set([...current, ...range]) : new Set(range);
+                    }
+                }
+
+                if (commandKey) {
+                    const next = new Set(current);
+                    if (next.has(sourcePath)) {
+                        next.delete(sourcePath);
+                    } else {
+                        next.add(sourcePath);
+                    }
+                    return next;
+                }
+
+                return new Set([sourcePath]);
+            });
+
+            setLastSelectedSourcePath(sourcePath);
+        },
+        [lastSelectedSourcePath, selectableSourcePaths],
+    );
+
+    const getDragSourcePaths = React.useCallback(
+        (sourcePath: string) => {
+            if (selectedSourcePaths.has(sourcePath)) return [...selectedSourcePaths];
+
+            setSelectedSourcePaths(new Set([sourcePath]));
+            setLastSelectedSourcePath(sourcePath);
+            return [sourcePath];
+        },
+        [selectedSourcePaths],
+    );
+
+    const moveMarkdownFiles = React.useCallback(
+        async (sourcePaths: string[], destinationFolder: string) => {
+            if (sourcePaths.length === 0) return;
+
+            try {
+                const response = await fetch("/__smooth-docs/move-markdown", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        sourcePaths,
+                        destinationFolder,
+                    }),
+                });
+                const data = (await response.json().catch(() => ({}))) as Partial<
+                    MoveMarkdownResult
+                > & {
+                    error?: string;
+                };
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? "Failed to move Markdown files");
+                }
+
+                applyDocsContentUpdate(data);
+
+                const moved = data.moved ?? [];
+                const movedCurrentPage = moved.find(
+                    (item) => item.sourcePath === currentPage.sourcePath,
+                );
+                const nextSelection = moved.map((item) => item.destinationPath);
+
+                if (nextSelection.length > 0) {
+                    setSelectedSourcePaths(new Set(nextSelection));
+                    setLastSelectedSourcePath(nextSelection.at(-1) ?? null);
+                }
+
+                if (movedCurrentPage) {
+                    navigateTo(movedCurrentPage.url, data.site ?? route.site);
+                }
+
+                if (moved.length === 0) {
+                    toast.message("Selected files are already in that folder.");
+                } else {
+                    toast.success(
+                        moved.length === 1
+                            ? "Moved Markdown file."
+                            : `Moved ${moved.length} Markdown files.`,
+                    );
+                }
+            } catch (error) {
+                toast.error("Move failed.", {
+                    description: error instanceof Error ? error.message : "Unknown error",
+                });
+            }
+        },
+        [applyDocsContentUpdate, currentPage.sourcePath, navigateTo, route.site],
+    );
+
+    const createDocsEntry = React.useCallback(
+        async (kind: "file" | "folder", folderPath = "", name = "") => {
+            try {
+                const response = await fetch("/__smooth-docs/create-docs-entry", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        site: route.site,
+                        kind,
+                        folderPath,
+                        name,
+                    }),
+                });
+                const data = (await response.json().catch(() => ({}))) as Partial<
+                    CreateDocsEntryResult
+                > & {
+                    error?: string;
+                };
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? `Failed to create ${kind}`);
+                }
+
+                if (!data.url || !data.sourcePath || !data.site) {
+                    throw new Error("Invalid response from docs action");
+                }
+
+                applyDocsContentUpdate(data);
+                if (kind === "file") {
+                    setSelectedSourcePaths(new Set([data.sourcePath]));
+                    setLastSelectedSourcePath(data.sourcePath);
+                } else {
+                    setSelectedSourcePaths(new Set());
+                    setLastSelectedSourcePath(null);
+                }
+                navigateTo(data.url, data.site);
+
+                toast.success(kind === "folder" ? "Created folder." : "Created file.", {
+                    description: kind === "folder" ? data.folderPath : data.sourcePath,
+                });
+                return true;
+            } catch (error) {
+                toast.error("Create failed.", {
+                    description: error instanceof Error ? error.message : "Unknown error",
+                });
+                return false;
+            }
+        },
+        [applyDocsContentUpdate, navigateTo, route.site],
+    );
+
+    const openDocsEntryContextMenu = React.useCallback(
+        (event: React.MouseEvent, target: DocsEntryTarget) => {
+            event.preventDefault();
+            event.stopPropagation();
+
+            let nextTarget = target;
+
+            if (
+                target.sourcePath &&
+                selectedSourcePaths.has(target.sourcePath) &&
+                selectedSourcePaths.size > 1
+            ) {
+                nextTarget = {
+                    title: `${selectedSourcePaths.size} selected files`,
+                    kind: "selection",
+                    url: "",
+                    sourcePaths: [...selectedSourcePaths],
+                };
+            } else if (target.sourcePath) {
+                selectPageSourcePath(target.sourcePath, {
+                    metaKey: false,
+                    ctrlKey: false,
+                    shiftKey: false,
+                });
+            }
+
+            setDocsEntryMenu({
+                x: event.clientX,
+                y: event.clientY,
+                target: nextTarget,
+            });
+        },
+        [selectPageSourcePath, selectedSourcePaths],
+    );
+
+    const createMarkdownFromTarget = React.useCallback(
+        (target: DocsEntryTarget) => {
+            void createDocsEntry("file", getCreateFolderPathForTarget(target, route.site));
+        },
+        [createDocsEntry, route.site],
+    );
+
+    const createFolderFromTarget = React.useCallback(
+        (target: DocsEntryTarget) => {
+            setCreateFolderTarget(target);
+        },
+        [],
+    );
+
+    const renameDocsEntry = React.useCallback(
+        async (target: DocsEntryTarget, newName: string) => {
+            try {
+                const response = await fetch("/__smooth-docs/rename-docs-entry", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        site: route.site,
+                        sourcePath: target.sourcePath,
+                        folderPath: target.folderPath,
+                        newName,
+                    }),
+                });
+                const data = (await response.json().catch(() => ({}))) as Partial<
+                    RenameDocsEntryResult
+                > & {
+                    error?: string;
+                };
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? "Failed to rename docs entry");
+                }
+
+                applyDocsContentUpdate(data);
+
+                const renamed = data.renamed ?? [];
+                const renamedCurrentPage = renamed.find(
+                    (item) => item.sourcePath === currentPage.sourcePath,
+                );
+                if (renamedCurrentPage) {
+                    navigateTo(renamedCurrentPage.url, data.site ?? route.site);
+                }
+
+                if (renamed.length > 0) {
+                    setSelectedSourcePaths(
+                        new Set(renamed.map((item) => item.destinationPath)),
+                    );
+                    setLastSelectedSourcePath(renamed.at(-1)?.destinationPath ?? null);
+                }
+
+                toast.success(target.kind === "folder" ? "Renamed folder." : "Renamed file.");
+            } catch (error) {
+                toast.error("Rename failed.", {
+                    description: error instanceof Error ? error.message : "Unknown error",
+                });
+            }
+        },
+        [applyDocsContentUpdate, currentPage.sourcePath, navigateTo, route.site],
+    );
+
+    const deleteDocsEntry = React.useCallback(
+        async (target: DocsEntryTarget) => {
+            try {
+                const response = await fetch("/__smooth-docs/delete-docs-entry", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        site: route.site,
+                        sourcePath: target.sourcePath,
+                        sourcePaths: target.sourcePaths,
+                        folderPath: target.folderPath,
+                    }),
+                });
+                const data = (await response.json().catch(() => ({}))) as Partial<
+                    DeleteDocsEntryResult
+                > & {
+                    error?: string;
+                };
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? "Failed to delete docs entry");
+                }
+
+                const deleted = new Set(data.deleted ?? []);
+                const deletedCurrentPage = deleted.has(currentPage.sourcePath);
+                applyDocsContentUpdate(data);
+                setSelectedSourcePaths((current) => {
+                    const next = new Set(
+                        [...current].filter((sourcePath) => !deleted.has(sourcePath)),
+                    );
+                    return next;
+                });
+                setLastSelectedSourcePath((current) =>
+                    current && deleted.has(current) ? null : current,
+                );
+
+                if (deletedCurrentPage) {
+                    navigateTo("/", data.site ?? route.site);
+                }
+
+                toast.success(
+                    target.kind === "selection"
+                        ? `Deleted ${deleted.size} files.`
+                        : target.kind === "folder"
+                          ? "Deleted folder."
+                          : "Deleted file.",
+                );
+            } catch (error) {
+                toast.error("Delete failed.", {
+                    description: error instanceof Error ? error.message : "Unknown error",
+                });
+            }
+        },
+        [applyDocsContentUpdate, currentPage.sourcePath, navigateTo, route.site],
+    );
+
     const switchSite = React.useCallback(
         (nextSite: SiteKey) => {
             navigateTo(currentPage.url, nextSite);
@@ -532,6 +1106,13 @@ export function App() {
             setUiSettings((current) => ({ ...current, [key]: value }));
         },
         [],
+    );
+
+    const updateArticleFontScale = React.useCallback(
+        (value: number) => {
+            updateUiSetting("articleFontScale", clampArticleFontScale(value));
+        },
+        [updateUiSetting],
     );
 
     const resetUiSettings = React.useCallback(() => {
@@ -790,6 +1371,9 @@ export function App() {
             ];
 
             savePinnedBlocksForCurrentPage(nextBlocks);
+            setUiSettings((current) =>
+                current.showRightSidebar ? current : { ...current, showRightSidebar: true },
+            );
             setSidebarOpen(false);
             request.sourceElement.classList.add("docs-pin-source--pinned");
             window.setTimeout(() => {
@@ -1011,6 +1595,30 @@ export function App() {
         setHeaderVisible(true);
     }, [commandOpen, route.pagePath, route.site]);
 
+    const pageActiveBar = !editMode ? (
+        <ArticleActiveBar
+            docsTheme={docsThemeState.currentTheme}
+            docsThemeApplying={docsThemeState.applying}
+            docsThemeError={docsThemeState.error}
+            docsThemeLoading={docsThemeState.loading}
+            docsThemeOptions={docsThemeState.themes}
+            fontScale={uiSettings.articleFontScale}
+            leftSidebarOpen={!zenMode && sidebarOpen}
+            leftSidebarWidth={leftSidebarWidth}
+            mainWidth={uiSettings.mainWidth}
+            onDocsThemeChange={changeDocsTheme}
+            onDocsThemesRefresh={loadDocsThemes}
+            onFontScaleChange={updateArticleFontScale}
+            onMainWidthChange={(value) => updateUiSetting("mainWidth", value)}
+            onSettingsOpen={() => setSettingsOpen(true)}
+            onThemeToggle={toggleTheme}
+            onRightSidebarToggle={toggleRightSidebar}
+            rightSidebarAvailable={canRenderSidePanel}
+            rightSidebarOpen={rightSidebarOpen}
+            theme={theme}
+        />
+    ) : null;
+
     return (
         <SidebarProvider
             className={cn(uiSettings.reduceMotion && "docs-reduce-motion")}
@@ -1020,11 +1628,21 @@ export function App() {
             {!zenMode && (
                 <DocsSidebar
                     currentPath={currentPage.url}
+                    currentSourcePath={currentPage.sourcePath}
+                    getDragSourcePaths={getDragSourcePaths}
+                    inboxUnreadCount={inboxUnreadCount}
                     items={docsData.nav}
+                    onCreateMarkdown={() => {
+                        void createDocsEntry("file", "");
+                    }}
+                    onEntryContextMenu={openDocsEntryContextMenu}
+                    onMoveMarkdown={moveMarkdownFiles}
                     onNavigate={(url) => navigateTo(url)}
+                    onPageSelect={selectPageSourcePath}
                     onSettingsOpen={() => setSettingsOpen(true)}
                     onWidthChange={updateLeftSidebarWidth}
                     pageUrls={pageUrls}
+                    selectedSourcePaths={selectedSourcePaths}
                     siteTitle={docsData.siteTitle}
                     width={leftSidebarWidth}
                     wrapText={uiSettings.leftSidebarWrap}
@@ -1038,7 +1656,9 @@ export function App() {
                 onCopyMarkdown={copyCurrentPageMarkdown}
                 onCopyPath={copyCurrentPagePath}
                 onCopyUrl={copyCurrentUrl}
-                onCreateMarkdown={() => setCreateMarkdownOpen(true)}
+                onCreateMarkdown={() => {
+                    void createDocsEntry("file", "");
+                }}
                 onPromoteDraft={() => setPromoteDraftOpen(true)}
                 onDeleteMarkdown={() => setDeleteMarkdownOpen(true)}
                 onNavigate={navigateTo}
@@ -1072,8 +1692,12 @@ export function App() {
 
             <CreateMarkdownDialog
                 currentPage={currentPage}
+                initialFolderPath={createMarkdownFolderPath}
                 open={createMarkdownOpen}
-                onOpenChange={setCreateMarkdownOpen}
+                onOpenChange={(open) => {
+                    setCreateMarkdownOpen(open);
+                    if (!open) setCreateMarkdownFolderPath(null);
+                }}
                 onCreated={(site, url, payload) => {
                     applyDocsContentUpdate(payload);
                     navigateTo(url, site);
@@ -1096,12 +1720,19 @@ export function App() {
                 onLayoutWidthsReset={resetLayoutWidths}
                 onOpenChange={setSettingsOpen}
                 onPinFontStepChange={updatePinFontStepIndex}
+                onDocsThemeChange={changeDocsTheme}
+                onDocsThemesRefresh={loadDocsThemes}
                 onSettingsChange={updateUiSetting}
                 onSettingsReset={resetUiSettings}
                 onThemeChange={setTheme}
                 open={settingsOpen}
                 pinFontStepIndex={pinFontStepIndex}
                 pinPanelWidth={pinPanelWidth}
+                docsTheme={docsThemeState.currentTheme}
+                docsThemeApplying={docsThemeState.applying}
+                docsThemeError={docsThemeState.error}
+                docsThemeLoading={docsThemeState.loading}
+                docsThemeOptions={docsThemeState.themes}
                 settings={uiSettings}
                 theme={theme}
                 tocPanelWidth={tocPanelWidth}
@@ -1150,7 +1781,6 @@ export function App() {
                                 "--docs-code-font-family": getCodeFontFamily(
                                     uiSettings.codeFontFamily,
                                 ),
-                                "--docs-code-font-size": `${uiSettings.codeFontSize}px`,
                                 "--docs-code-line-height": getCodeLineHeight(
                                     uiSettings.codeLineHeight,
                                 ),
@@ -1166,21 +1796,17 @@ export function App() {
                             } as React.CSSProperties
                         }
                         className={cn(
-                            "flex w-full flex-col gap-8",
-                            `docs-density-${uiSettings.density}`,
+                            "flex w-full flex-col gap-0",
                             `docs-code-theme-${uiSettings.codeTheme}`,
                             uiSettings.codeWrap && "docs-code-wrap",
                             uiSettings.editorWrap && "docs-editor-wrap",
                             canRenderSidePanel && "lg:flex-row lg:items-start",
+                            rightSidebarOpen && "gap-8",
                         )}>
                         <div className='min-w-0 flex-1 py-8'>
                             <div
-                                className={cn(
-                                    "mx-auto flex w-full flex-col gap-0",
-                                    hasPinnedBlocks
-                                        ? "max-w-none"
-                                        : "max-w-[var(--docs-main-max-width)]",
-                                )}>
+                                className='mx-auto flex w-full flex-col gap-0'
+                                style={{ maxWidth: "var(--docs-main-max-width)" }}>
                                 <PageHeader
                                     breadcrumbs={pageBreadcrumbs}
                                     canEditMarkdown={canEditMarkdown}
@@ -1203,13 +1829,37 @@ export function App() {
                                         value={editorText}
                                         wrapText={uiSettings.editorWrap}
                                     />
+                                ) : currentPage.kind === "inbox" && currentPage.inbox ? (
+                                    <InboxPage
+                                        key={`${route.site}-${currentPage.url}-inbox`}
+                                        getDragSourcePaths={getDragSourcePaths}
+                                        onEntryContextMenu={openDocsEntryContextMenu}
+                                        onNavigate={navigateTo}
+                                        page={currentPage}
+                                        readPageUrls={readPageUrls}
+                                    />
+                                ) : currentPage.kind === "folder" && currentPage.folder ? (
+                                    <FolderPage
+                                        key={`${route.site}-${currentPage.url}-folder`}
+                                        getDragSourcePaths={getDragSourcePaths}
+                                        onCreateFile={(folderPath) => {
+                                            void createDocsEntry("file", folderPath);
+                                        }}
+                                        onCreateFolder={(target) => setCreateFolderTarget(target)}
+                                        onEntryContextMenu={openDocsEntryContextMenu}
+                                        onMoveMarkdown={moveMarkdownFiles}
+                                        onNavigate={navigateTo}
+                                        page={currentPage}
+                                    />
                                 ) : (
                                     <Article
                                         key={`${route.site}-${currentPage.url}`}
+                                        fontScale={uiSettings.articleFontScale}
                                         page={currentPage}
                                         onPinMenuRequest={setPinMenu}
                                     />
                                 )}
+                                {pageActiveBar}
                             </div>
                         </div>
 
@@ -1252,6 +1902,63 @@ export function App() {
                 onPin={(block) => {
                     addPinnedBlock(block);
                     setPinMenu(null);
+                }}
+            />
+            <DocsEntryContextMenu
+                request={docsEntryMenu}
+                onClose={() => setDocsEntryMenu(null)}
+                onCreateFile={(target) => {
+                    setDocsEntryMenu(null);
+                    createMarkdownFromTarget(target);
+                }}
+                onCreateFolder={(target) => {
+                    setDocsEntryMenu(null);
+                    createFolderFromTarget(target);
+                }}
+                onDelete={(target) => {
+                    setDocsEntryMenu(null);
+                    setDeleteTarget(target);
+                }}
+                onRename={(target) => {
+                    setDocsEntryMenu(null);
+                    setRenameTarget(target);
+                }}
+            />
+            <CreateFolderDialog
+                open={createFolderTarget !== null}
+                target={createFolderTarget}
+                onOpenChange={(open) => {
+                    if (!open) setCreateFolderTarget(null);
+                }}
+                onCreate={async (target, name) => {
+                    const created = await createDocsEntry(
+                        "folder",
+                        getCreateFolderPathForTarget(target, route.site),
+                        name,
+                    );
+                    if (created) setCreateFolderTarget(null);
+                }}
+            />
+            <RenameDocsEntryDialog
+                open={renameTarget !== null}
+                target={renameTarget}
+                onOpenChange={(open) => {
+                    if (!open) setRenameTarget(null);
+                }}
+                onRename={async (target, newName) => {
+                    await renameDocsEntry(target, newName);
+                    setRenameTarget(null);
+                }}
+            />
+            <DeleteDocsEntryDialog
+                open={deleteTarget !== null}
+                target={deleteTarget}
+                onOpenChange={(open) => {
+                    if (!open) setDeleteTarget(null);
+                }}
+                onDelete={async (target) => {
+                    await deleteDocsEntry(target);
+                    setDeleteTarget(null);
                 }}
             />
             <Toaster position='bottom-right' theme={theme} closeButton />
@@ -1381,7 +2088,7 @@ function TableOfContents({
             <aside
                 aria-hidden={!open}
                 className={cn(
-                    "docs-toc-panel-desktop sticky hidden min-w-0 shrink-0 overflow-hidden transition-[width,top,height] duration-300 ease-smooth lg:block",
+                    "docs-toc-panel-desktop sticky hidden min-w-0 shrink-0 overflow-hidden transition-[width] duration-300 ease-smooth lg:block",
                     headerVisible ? "top-14 h-[calc(100vh-3.5rem)]" : "top-0 h-screen",
                     !open && "pointer-events-none",
                 )}
@@ -1658,7 +2365,7 @@ function PinnedBlocksPanel({
                 aria-label='Pinned blocks'
                 aria-hidden={!open}
                 className={cn(
-                    "docs-pin-panel-desktop sticky hidden shrink-0 overflow-hidden transition-[width,top,height] duration-300 ease-smooth lg:block",
+                    "docs-pin-panel-desktop sticky hidden shrink-0 overflow-hidden transition-[width] duration-300 ease-smooth lg:block",
                     headerVisible ? "top-14 h-[calc(100vh-3.5rem)]" : "top-0 h-screen",
                     !open && "pointer-events-none",
                 )}
@@ -1778,6 +2485,332 @@ function PinContextMenu({
                 </button>
             )}
         </div>
+    );
+}
+
+function DocsEntryContextMenu({
+    onClose,
+    onCreateFile,
+    onCreateFolder,
+    onDelete,
+    onRename,
+    request,
+}: {
+    onClose: () => void;
+    onCreateFile: (target: DocsEntryTarget) => void;
+    onCreateFolder: (target: DocsEntryTarget) => void;
+    onDelete: (target: DocsEntryTarget) => void;
+    onRename: (target: DocsEntryTarget) => void;
+    request: DocsEntryContextMenuRequest | null;
+}) {
+    const ref = React.useRef<HTMLDivElement>(null);
+    const [position, setPosition] = React.useState({ x: 0, y: 0 });
+
+    React.useLayoutEffect(() => {
+        if (!request) return;
+
+        setPosition({ x: request.x, y: request.y });
+
+        window.requestAnimationFrame(() => {
+            const menu = ref.current;
+            if (!menu) return;
+
+            const rect = menu.getBoundingClientRect();
+            const padding = 8;
+            setPosition({
+                x: Math.min(request.x, window.innerWidth - rect.width - padding),
+                y: Math.min(request.y, window.innerHeight - rect.height - padding),
+            });
+        });
+    }, [request]);
+
+    React.useEffect(() => {
+        if (!request) return;
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target;
+            if (target instanceof Node && ref.current?.contains(target)) return;
+            onClose();
+        };
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") onClose();
+        };
+
+        const handleScroll = () => onClose();
+
+        document.addEventListener("pointerdown", handlePointerDown, true);
+        document.addEventListener("keydown", handleKeyDown);
+        window.addEventListener("scroll", handleScroll, { passive: true });
+
+        return () => {
+            document.removeEventListener("pointerdown", handlePointerDown, true);
+            document.removeEventListener("keydown", handleKeyDown);
+            window.removeEventListener("scroll", handleScroll);
+        };
+    }, [onClose, request]);
+
+    if (!request) return null;
+
+    const { target } = request;
+    const isSystemFolder = target.system === "inbox";
+    const isRoot = target.kind === "root";
+    const isSelection = target.kind === "selection";
+
+    return (
+        <div
+            ref={ref}
+            className='docs-pin-context-menu'
+            style={{ left: position.x, top: position.y }}
+            role='menu'>
+            {!isSelection && (
+                <>
+                    <button
+                        type='button'
+                        className='docs-pin-context-menu-item'
+                        role='menuitem'
+                        onClick={() => onCreateFile(target)}>
+                        <Plus className='h-3.5 w-3.5' />
+                        <span className='min-w-0 truncate'>Add file</span>
+                    </button>
+                    <button
+                        type='button'
+                        className='docs-pin-context-menu-item'
+                        role='menuitem'
+                        onClick={() => onCreateFolder(target)}>
+                        <FolderPlus className='h-3.5 w-3.5' />
+                        <span className='min-w-0 truncate'>Add folder</span>
+                    </button>
+                </>
+            )}
+            {!isRoot && !isSelection && (
+                <button
+                    type='button'
+                    className='docs-pin-context-menu-item'
+                    role='menuitem'
+                    disabled={isSystemFolder}
+                    onClick={() => onRename(target)}>
+                    <PencilLine className='h-3.5 w-3.5' />
+                    <span className='min-w-0 truncate'>Rename</span>
+                </button>
+            )}
+            {!isRoot && (
+                <button
+                    type='button'
+                    className='docs-pin-context-menu-item text-destructive'
+                    role='menuitem'
+                    disabled={isSystemFolder}
+                    onClick={() => onDelete(target)}>
+                    <Trash2 className='h-3.5 w-3.5' />
+                    <span className='min-w-0 truncate'>
+                        {isSelection
+                            ? `Delete ${target.sourcePaths?.length ?? 0} selected`
+                            : "Delete"}
+                    </span>
+                </button>
+            )}
+            {isSystemFolder && (
+                <div className='px-2 py-1 text-xs text-muted-foreground'>System folder</div>
+            )}
+        </div>
+    );
+}
+
+function CreateFolderDialog({
+    onCreate,
+    onOpenChange,
+    open,
+    target,
+}: {
+    onCreate: (target: DocsEntryTarget, name: string) => Promise<void>;
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+    target: DocsEntryTarget | null;
+}) {
+    const inputRef = React.useRef<HTMLInputElement>(null);
+    const [name, setName] = React.useState("untitled");
+    const [submitting, setSubmitting] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!open) return;
+
+        setName("untitled");
+        setSubmitting(false);
+        window.requestAnimationFrame(() => inputRef.current?.focus());
+    }, [open]);
+
+    const submit = React.useCallback(async () => {
+        if (!target || submitting || !name.trim()) return;
+
+        setSubmitting(true);
+        await onCreate(target, name);
+        setSubmitting(false);
+    }, [name, onCreate, submitting, target]);
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className='max-w-md'>
+                <DialogTitle>Add folder</DialogTitle>
+                <DialogDescription>Create a folder in the selected sidebar location.</DialogDescription>
+                <div className='space-y-2'>
+                    <label className='text-sm font-medium' htmlFor='create-docs-folder-name'>
+                        Name
+                    </label>
+                    <Input
+                        ref={inputRef}
+                        id='create-docs-folder-name'
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        onFocus={(event) => event.currentTarget.select()}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                                event.preventDefault();
+                                void submit();
+                            }
+                        }}
+                    />
+                </div>
+                <div className='flex justify-end gap-2'>
+                    <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+                        Cancel
+                    </Button>
+                    <Button type='button' disabled={submitting || !name.trim()} onClick={submit}>
+                        Create
+                    </Button>
+                </div>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function RenameDocsEntryDialog({
+    onOpenChange,
+    onRename,
+    open,
+    target,
+}: {
+    onOpenChange: (open: boolean) => void;
+    onRename: (target: DocsEntryTarget, newName: string) => Promise<void>;
+    open: boolean;
+    target: DocsEntryTarget | null;
+}) {
+    const inputRef = React.useRef<HTMLInputElement>(null);
+    const [name, setName] = React.useState("");
+    const [submitting, setSubmitting] = React.useState(false);
+
+    React.useEffect(() => {
+        if (!open || !target) return;
+
+        setName(defaultRenameName(target));
+        setSubmitting(false);
+        window.requestAnimationFrame(() => inputRef.current?.focus());
+    }, [open, target]);
+
+    const submit = React.useCallback(async () => {
+        if (!target || submitting) return;
+
+        setSubmitting(true);
+        await onRename(target, name);
+        setSubmitting(false);
+    }, [name, onRename, submitting, target]);
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className='max-w-md'>
+                <DialogTitle>Rename {target?.kind === "folder" ? "folder" : "file"}</DialogTitle>
+                <DialogDescription>
+                    Rename this {target?.kind === "folder" ? "folder" : "Markdown file"}.
+                </DialogDescription>
+                <div className='space-y-2'>
+                    <label className='text-sm font-medium' htmlFor='rename-docs-entry-name'>
+                        Name
+                    </label>
+                    <Input
+                        ref={inputRef}
+                        id='rename-docs-entry-name'
+                        value={name}
+                        onChange={(event) => setName(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                                event.preventDefault();
+                                void submit();
+                            }
+                        }}
+                    />
+                </div>
+                <div className='flex justify-end gap-2'>
+                    <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+                        Cancel
+                    </Button>
+                    <Button type='button' disabled={submitting || !name.trim()} onClick={submit}>
+                        Rename
+                    </Button>
+                </div>
+            </DialogContent>
+        </Dialog>
+    );
+}
+
+function DeleteDocsEntryDialog({
+    onDelete,
+    onOpenChange,
+    open,
+    target,
+}: {
+    onDelete: (target: DocsEntryTarget) => Promise<void>;
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
+    target: DocsEntryTarget | null;
+}) {
+    const [submitting, setSubmitting] = React.useState(false);
+
+    React.useEffect(() => {
+        if (open) setSubmitting(false);
+    }, [open]);
+
+    const submit = React.useCallback(async () => {
+        if (!target || submitting) return;
+
+        setSubmitting(true);
+        await onDelete(target);
+        setSubmitting(false);
+    }, [onDelete, submitting, target]);
+
+    return (
+        <Dialog open={open} onOpenChange={onOpenChange}>
+            <DialogContent className='max-w-md'>
+                <DialogTitle>
+                    Delete{" "}
+                    {target?.kind === "selection"
+                        ? `${target.sourcePaths?.length ?? 0} files`
+                        : target?.kind === "folder"
+                          ? "folder"
+                          : "file"}
+                </DialogTitle>
+                <DialogDescription>
+                    {target?.kind === "selection"
+                        ? "Delete the selected Markdown files."
+                        : target?.kind === "folder"
+                          ? "Delete this folder and everything inside it."
+                          : "Delete this Markdown file."}
+                </DialogDescription>
+                <div className='rounded-md border bg-muted px-3 py-2 text-sm'>
+                    {target?.title}
+                </div>
+                <div className='flex justify-end gap-2'>
+                    <Button type='button' variant='outline' onClick={() => onOpenChange(false)}>
+                        Cancel
+                    </Button>
+                    <Button
+                        type='button'
+                        variant='destructive'
+                        disabled={submitting}
+                        onClick={submit}>
+                        Delete
+                    </Button>
+                </div>
+            </DialogContent>
+        </Dialog>
     );
 }
 
@@ -1982,12 +3015,14 @@ function ActionCommandDialog({
 
 function CreateMarkdownDialog({
     currentPage,
+    initialFolderPath,
     onCreated,
     onOpenChange,
     open,
     site,
 }: {
     currentPage: DocPage;
+    initialFolderPath: string | null;
     onCreated: (site: SiteKey, url: string, payload: DocsContentUpdatePayload) => void;
     onOpenChange: (open: boolean) => void;
     open: boolean;
@@ -1995,11 +3030,15 @@ function CreateMarkdownDialog({
 }) {
     const inputRef = React.useRef<HTMLInputElement>(null);
     const defaultFilePath = React.useMemo(() => {
+        if (initialFolderPath !== null) {
+            return initialFolderPath ? `${initialFolderPath}/new.md` : "new.md";
+        }
+
         const relativePath = getSiteSourceRelativePath(currentPage.sourcePath, site);
         const folderPath = relativePath ? getPathDirName(relativePath) : "";
 
         return folderPath ? `${folderPath}/new.md` : "new.md";
-    }, [currentPage.sourcePath, site]);
+    }, [currentPage.sourcePath, initialFolderPath, site]);
     const [filePath, setFilePath] = React.useState(defaultFilePath);
     const [folderSuggestions, setFolderSuggestions] = React.useState<FolderSuggestion[]>([]);
     const [selectedFolderIndex, setSelectedFolderIndex] = React.useState(0);
@@ -2540,8 +3579,15 @@ function DeleteMarkdownDialog({
 }
 
 function DocsSettingsDialog({
+    docsTheme,
+    docsThemeApplying,
+    docsThemeError,
+    docsThemeLoading,
+    docsThemeOptions,
     leftSidebarWidth,
     onLayoutWidthsReset,
+    onDocsThemeChange,
+    onDocsThemesRefresh,
     onOpenChange,
     onPinFontStepChange,
     onSettingsChange,
@@ -2554,8 +3600,15 @@ function DocsSettingsDialog({
     theme,
     tocPanelWidth,
 }: {
+    docsTheme: string;
+    docsThemeApplying: boolean;
+    docsThemeError: string;
+    docsThemeLoading: boolean;
+    docsThemeOptions: DocsThemeOption[];
     leftSidebarWidth: number;
     onLayoutWidthsReset: () => void;
+    onDocsThemeChange: (theme: string) => void;
+    onDocsThemesRefresh: () => void;
     onOpenChange: (open: boolean) => void;
     onPinFontStepChange: (index: number) => void;
     onSettingsChange: <K extends keyof DocsUiSettings>(key: K, value: DocsUiSettings[K]) => void;
@@ -2571,6 +3624,14 @@ function DocsSettingsDialog({
     const [activeSection, setActiveSection] = React.useState<SettingsSectionId>("general");
     const pinFontPercent = Math.round(PIN_FONT_STEPS[pinFontStepIndex] * 100);
     const codeThemeOptions = getCodeThemeOptions(theme);
+    const docsThemeDescription = docsThemeError
+        ? docsThemeError
+        : docsThemeApplying
+          ? "Applying the selected docs theme."
+          : docsThemeLoading
+            ? "Loading installed docs themes."
+            : "Choose the Smooth Docs theme written to the project config.";
+    const selectedDocsTheme = docsTheme || docsThemeOptions[0]?.name || "";
 
     const setSetting = React.useCallback(
         <K extends keyof DocsUiSettings>(key: K, value: DocsUiSettings[K]) => {
@@ -2648,8 +3709,37 @@ function DocsSettingsDialog({
 
                     {activeSection === "general" && (
                         <SettingsSection title='General'>
+                            <SettingRow title='Docs theme' description={docsThemeDescription}>
+                                {docsThemeOptions.length > 0 ? (
+                                    <Select
+                                        value={selectedDocsTheme}
+                                        onValueChange={onDocsThemeChange}
+                                        disabled={docsThemeLoading || docsThemeApplying}>
+                                        <SelectTrigger className='w-44'>
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {docsThemeOptions.map((option) => (
+                                                <SelectItem key={option.name} value={option.name}>
+                                                    {option.title}
+                                                    {option.requiresRestart ? " (restart)" : ""}
+                                                </SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                ) : (
+                                    <Button
+                                        type='button'
+                                        variant='outline'
+                                        className='h-9'
+                                        disabled={docsThemeLoading}
+                                        onClick={onDocsThemesRefresh}>
+                                        Load themes
+                                    </Button>
+                                )}
+                            </SettingRow>
                             <SettingRow
-                                title='Theme'
+                                title='Color mode'
                                 description='Choose the color theme used by the docs UI.'>
                                 <Select
                                     value={theme}
@@ -2710,22 +3800,13 @@ function DocsSettingsDialog({
                                 </Select>
                             </SettingRow>
                             <SettingRow
-                                title='Reading density'
-                                description='Change vertical rhythm in article content.'>
-                                <Select
-                                    value={settings.density}
-                                    onValueChange={(value) =>
-                                        setSetting("density", value as DensitySetting)
-                                    }>
-                                    <SelectTrigger className='w-44'>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        <SelectItem value='compact'>Compact</SelectItem>
-                                        <SelectItem value='comfortable'>Comfortable</SelectItem>
-                                        <SelectItem value='spacious'>Spacious</SelectItem>
-                                    </SelectContent>
-                                </Select>
+                                title='Article font size'
+                                description={`Article text is scaled to ${settings.articleFontScale}%.`}>
+                                <ArticleFontScaleSlider
+                                    className='w-56'
+                                    value={settings.articleFontScale}
+                                    onChange={(value) => setSetting("articleFontScale", value)}
+                                />
                             </SettingRow>
                             <SettingRow
                                 title='Panel widths'
@@ -2837,24 +3918,6 @@ function DocsSettingsDialog({
                                         <SelectItem value='mono'>Mono</SelectItem>
                                         <SelectItem value='system'>System</SelectItem>
                                         <SelectItem value='serif'>Serif</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                            </SettingRow>
-                            <SettingRow title='Font size' description='Set code block text size.'>
-                                <Select
-                                    value={settings.codeFontSize}
-                                    onValueChange={(value) =>
-                                        setSetting("codeFontSize", value as CodeFontSizeSetting)
-                                    }>
-                                    <SelectTrigger className='w-44'>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {["12", "13", "14", "15", "16"].map((value) => (
-                                            <SelectItem key={value} value={value}>
-                                                {value}px
-                                            </SelectItem>
-                                        ))}
                                     </SelectContent>
                                 </Select>
                             </SettingRow>
@@ -3049,7 +4112,7 @@ function PageHeader({
     showBreadcrumbs: boolean;
 }) {
     return (
-        <div className='space-y-4'>
+        <div className='docs-page-header space-y-4'>
             <div className='space-y-3'>
                 <div className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                     {showBreadcrumbs ? (
@@ -3148,7 +4211,7 @@ function PageHeader({
                         </div>
                     </TooltipProvider>
                 </div>
-                <h1 className='break-words text-2xl font-semibold tracking-normal md:text-3xl'>
+                <h1 className='docs-page-title break-words text-2xl font-semibold tracking-normal md:text-3xl'>
                     {page.title}
                 </h1>
             </div>
@@ -3227,6 +4290,9 @@ function MarkdownEditor({
                     ref={textareaRef}
                     className='docs-markdown-editor-input'
                     value={value}
+                    autoCapitalize='off'
+                    autoComplete='off'
+                    autoCorrect='off'
                     wrap={wrapText ? "soft" : "off"}
                     onChange={(event) => onChange(event.target.value)}
                     onScroll={syncHighlightScroll}
@@ -3250,10 +4316,496 @@ function MarkdownEditor({
     );
 }
 
+function InboxPage({
+    getDragSourcePaths,
+    onEntryContextMenu,
+    onNavigate,
+    page,
+    readPageUrls,
+}: {
+    getDragSourcePaths: (sourcePath: string) => string[];
+    onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onNavigate: (url: string) => void;
+    page: DocPage;
+    readPageUrls: ReadonlySet<string>;
+}) {
+    const items = page.inbox?.items ?? [];
+    const [unreadOnly, setUnreadOnly] = React.useState(false);
+    const sortedItems = React.useMemo(
+        () =>
+            [...items].sort((first, second) => {
+                const firstUnread = !readPageUrls.has(first.url);
+                const secondUnread = !readPageUrls.has(second.url);
+
+                if (firstUnread !== secondUnread) {
+                    return firstUnread ? -1 : 1;
+                }
+
+                const firstCreatedAt =
+                    parseInboxTimestamp(first.createdAt) ??
+                    parseInboxTimestamp(first.updatedAt) ??
+                    0;
+                const secondCreatedAt =
+                    parseInboxTimestamp(second.createdAt) ??
+                    parseInboxTimestamp(second.updatedAt) ??
+                    0;
+
+                return secondCreatedAt - firstCreatedAt;
+            }),
+        [items, readPageUrls],
+    );
+    const unreadCount = sortedItems.filter((item) => !readPageUrls.has(item.url)).length;
+    const displayItems = React.useMemo(
+        () =>
+            unreadOnly
+                ? sortedItems.filter((item) => !readPageUrls.has(item.url))
+                : sortedItems,
+        [readPageUrls, sortedItems, unreadOnly],
+    );
+    const relativeNow = useInboxRelativeTimeNow(displayItems);
+
+    return (
+        <section className='mt-6 space-y-4'>
+            <div className='flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                <div className='flex min-w-0 items-center gap-3'>
+                    <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground'>
+                        <Inbox className='h-5 w-5' />
+                    </span>
+                    <div className='min-w-0'>
+                        <p className='text-sm font-medium'>{items.length} documents</p>
+                        <p className='truncate text-sm text-muted-foreground'>
+                            Unread inbox files appear first.
+                        </p>
+                    </div>
+                </div>
+                <div className='flex shrink-0 items-center gap-2'>
+                    <Toggle
+                        pressed={unreadOnly}
+                        disabled={unreadCount === 0}
+                        className='h-7 gap-1.5 px-2 text-xs'
+                        aria-label='Show unread inbox documents only'
+                        onPressedChange={setUnreadOnly}>
+                        <Circle className='h-3.5 w-3.5 fill-primary text-primary' />
+                        Unread only
+                    </Toggle>
+                    <Badge variant={unreadCount > 0 ? "default" : "secondary"} className='w-fit'>
+                        {unreadCount} unread
+                    </Badge>
+                </div>
+            </div>
+
+            <div className='overflow-hidden rounded-md border bg-card'>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead className='w-[92px]'>Status</TableHead>
+                            <TableHead>Document</TableHead>
+                            <TableHead className='hidden w-28 md:table-cell'>Added</TableHead>
+                            <TableHead className='hidden w-28 lg:table-cell'>Updated</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {displayItems.length === 0 ? (
+                            <TableRow>
+                                <TableCell
+                                    colSpan={4}
+                                    className='h-24 text-center text-sm text-muted-foreground'>
+                                    {unreadOnly ? "No unread inbox documents" : "Empty inbox"}
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            displayItems.map((item) => {
+                                const isRead = readPageUrls.has(item.url);
+                                const addedAt = formatInboxDate(item.createdAt, relativeNow);
+                                const updatedAt = formatInboxDate(item.updatedAt, relativeNow);
+                                const addedAtTitle = formatInboxAbsoluteDate(item.createdAt);
+                                const updatedAtTitle = formatInboxAbsoluteDate(item.updatedAt);
+
+                                return (
+                                    <TableRow
+                                        key={item.url}
+                                        draggable
+                                        role='link'
+                                        tabIndex={0}
+                                        className='cursor-pointer'
+                                        onClick={() => onNavigate(item.url)}
+                                        onContextMenu={(event) =>
+                                            onEntryContextMenu(event, {
+                                                title: item.title,
+                                                kind: "page",
+                                                url: item.url,
+                                                sourcePath: item.sourcePath,
+                                            })
+                                        }
+                                        onDragStart={(event) => {
+                                            const sourcePaths = getDragSourcePaths(item.sourcePath);
+                                            writeDraggedSourcePaths(event, sourcePaths, {
+                                                sourceLabel: "Inbox",
+                                                title: item.title,
+                                            });
+                                        }}
+                                        onKeyDown={(event) => {
+                                            if (event.key !== "Enter" && event.key !== " ") return;
+
+                                            event.preventDefault();
+                                            onNavigate(item.url);
+                                        }}>
+                                        <TableCell>
+                                            <span
+                                                className={cn(
+                                                    "inline-flex items-center gap-1.5 text-xs font-medium",
+                                                    isRead
+                                                        ? "text-muted-foreground"
+                                                        : "text-foreground",
+                                                )}>
+                                                {isRead ? (
+                                                    <CheckCircle2 className='h-4 w-4' />
+                                                ) : (
+                                                    <Circle className='h-4 w-4 fill-primary text-primary' />
+                                                )}
+                                                {isRead ? "Read" : "Unread"}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className='group flex min-w-0 flex-col text-left'>
+                                                <span className='line-clamp-1 font-medium text-foreground group-hover:underline'>
+                                                    {item.title}
+                                                </span>
+                                                <span className='mt-1 line-clamp-1 max-w-2xl text-xs leading-5 text-muted-foreground'>
+                                                    {item.text || item.sourcePath}
+                                                </span>
+                                                <span
+                                                    className='mt-2 text-xs text-muted-foreground md:hidden'
+                                                    title={addedAtTitle}>
+                                                    Added {addedAt}
+                                                </span>
+                                            </div>
+                                        </TableCell>
+                                        <TableCell
+                                            className='hidden whitespace-nowrap text-sm text-muted-foreground md:table-cell'
+                                            title={addedAtTitle}>
+                                            {addedAt}
+                                        </TableCell>
+                                        <TableCell
+                                            className='hidden whitespace-nowrap text-sm text-muted-foreground lg:table-cell'
+                                            title={updatedAtTitle}>
+                                            {updatedAt}
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+        </section>
+    );
+}
+
+function countUnreadInboxItems(
+    pages: ReadonlyArray<DocPage>,
+    readPageUrls: ReadonlySet<string>,
+) {
+    const inboxPage = pages.find((page) => page.kind === "inbox" && page.inbox);
+
+    return (
+        inboxPage?.inbox?.items.reduce(
+            (count, item) => count + (readPageUrls.has(item.url) ? 0 : 1),
+            0,
+        ) ?? 0
+    );
+}
+
+function FolderPage({
+    getDragSourcePaths,
+    onCreateFile,
+    onCreateFolder,
+    onEntryContextMenu,
+    onMoveMarkdown,
+    onNavigate,
+    page,
+}: {
+    getDragSourcePaths: (sourcePath: string) => string[];
+    onCreateFile: (folderPath: string) => void;
+    onCreateFolder: (target: DocsEntryTarget) => void;
+    onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onMoveMarkdown: (sourcePaths: string[], destinationFolder: string) => void;
+    onNavigate: (url: string) => void;
+    page: DocPage;
+}) {
+    const items = page.folder?.items ?? [];
+    const folderPath = page.folder?.root ?? "";
+    const folderTarget: DocsEntryTarget = React.useMemo(
+        () => ({
+            title: page.title,
+            kind: "folder",
+            url: page.url,
+            folderPath,
+        }),
+        [folderPath, page.title, page.url],
+    );
+    const folderCount = items.filter((item) => item.kind === "folder").length;
+    const fileCount = items.length - folderCount;
+    const relativeNow = useFolderRelativeTimeNow(items);
+    const [dropTarget, setDropTarget] = React.useState<string | null>(null);
+
+    return (
+        <section className='mt-6 space-y-4'>
+            <div className='flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
+                <div className='flex min-w-0 items-center gap-3'>
+                    <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground'>
+                        <Folder className='h-5 w-5' />
+                    </span>
+                    <div className='min-w-0'>
+                        <p className='text-sm font-medium'>
+                            {folderCount} folders, {fileCount} files
+                        </p>
+                        <p className='truncate text-sm text-muted-foreground'>
+                            Direct items in {folderPath || "docs"}.
+                        </p>
+                    </div>
+                </div>
+                <div className='flex shrink-0 items-center gap-1.5'>
+                    <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    variant='outline'
+                                    size='icon'
+                                    className='h-8 w-8'
+                                    aria-label='Add file to folder'
+                                    onClick={() => onCreateFile(folderPath)}>
+                                    <Plus className='h-4 w-4' />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Add file</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    variant='outline'
+                                    size='icon'
+                                    className='h-8 w-8'
+                                    aria-label='Add folder to folder'
+                                    onClick={() => onCreateFolder(folderTarget)}>
+                                    <FolderPlus className='h-4 w-4' />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Add folder</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                    <Badge variant='secondary' className='ml-1 w-fit'>
+                        {items.length} items
+                    </Badge>
+                </div>
+            </div>
+
+            <div className='overflow-hidden rounded-md border bg-card'>
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead className='w-[92px]'>Type</TableHead>
+                            <TableHead>Name</TableHead>
+                            <TableHead className='hidden w-28 md:table-cell'>Updated</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {items.length === 0 ? (
+                            <TableRow>
+                                <TableCell
+                                    colSpan={3}
+                                    className='h-24 text-center text-sm text-muted-foreground'>
+                                    Empty folder
+                                </TableCell>
+                            </TableRow>
+                        ) : (
+                            items.map((item) => {
+                                const isFolder = item.kind === "folder";
+                                const updatedAt = formatInboxDate(item.updatedAt, relativeNow);
+                                const updatedAtTitle = formatInboxAbsoluteDate(item.updatedAt);
+                                const isDropTarget =
+                                    isFolder && dropTarget === item.folderPath;
+
+                                return (
+                                    <TableRow
+                                        key={`${item.kind}-${item.url}`}
+                                        draggable={!isFolder && Boolean(item.sourcePath)}
+                                        role='link'
+                                        tabIndex={0}
+                                        className={cn(
+                                            "cursor-pointer",
+                                            isDropTarget && "bg-muted/80",
+                                        )}
+                                        onClick={() => onNavigate(item.url)}
+                                        onContextMenu={(event) =>
+                                            onEntryContextMenu(
+                                                event,
+                                                isFolder
+                                                    ? {
+                                                          title: item.title,
+                                                          kind: "folder",
+                                                          url: item.url,
+                                                          folderPath: item.folderPath,
+                                                      }
+                                                    : {
+                                                          title: item.title,
+                                                          kind: "page",
+                                                          url: item.url,
+                                                          sourcePath: item.sourcePath,
+                                                      },
+                                            )
+                                        }
+                                        onDragStart={(event) => {
+                                            if (!item.sourcePath) return;
+                                            const sourcePaths = getDragSourcePaths(item.sourcePath);
+                                            writeDraggedSourcePaths(event, sourcePaths, {
+                                                sourceLabel: "Folder",
+                                                title: item.title,
+                                            });
+                                        }}
+                                        onDragOver={(event) => {
+                                            if (!isFolder || !item.folderPath) return;
+                                            if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) {
+                                                return;
+                                            }
+
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            event.dataTransfer.dropEffect = "move";
+                                            setDropTarget(item.folderPath);
+                                        }}
+                                        onDragLeave={(event) => {
+                                            const relatedTarget = event.relatedTarget;
+                                            if (
+                                                relatedTarget instanceof Node &&
+                                                event.currentTarget.contains(relatedTarget)
+                                            ) {
+                                                return;
+                                            }
+                                            setDropTarget(null);
+                                        }}
+                                        onDrop={(event) => {
+                                            if (!isFolder || !item.folderPath) return;
+                                            const sourcePaths = readDraggedSourcePaths(event);
+                                            if (sourcePaths.length === 0) return;
+
+                                            event.preventDefault();
+                                            event.stopPropagation();
+                                            setDropTarget(null);
+                                            onMoveMarkdown(sourcePaths, item.folderPath);
+                                        }}
+                                        onKeyDown={(event) => {
+                                            if (event.key !== "Enter" && event.key !== " ") return;
+
+                                            event.preventDefault();
+                                            onNavigate(item.url);
+                                        }}>
+                                        <TableCell>
+                                            <span className='inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
+                                                {isFolder ? (
+                                                    <Folder className='h-4 w-4' />
+                                                ) : (
+                                                    <FileText className='h-4 w-4' />
+                                                )}
+                                                {isFolder ? "Folder" : "File"}
+                                            </span>
+                                        </TableCell>
+                                        <TableCell>
+                                            <div className='group flex min-w-0 flex-col text-left'>
+                                                <span className='line-clamp-1 font-medium text-foreground group-hover:underline'>
+                                                    {item.title}
+                                                </span>
+                                                <span className='mt-1 line-clamp-1 max-w-2xl text-xs leading-5 text-muted-foreground'>
+                                                    {item.text || item.sourcePath || item.folderPath}
+                                                </span>
+                                                {!isFolder && (
+                                                    <span
+                                                        className='mt-2 text-xs text-muted-foreground md:hidden'
+                                                        title={updatedAtTitle}>
+                                                        Updated {updatedAt}
+                                                    </span>
+                                                )}
+                                            </div>
+                                        </TableCell>
+                                        <TableCell
+                                            className='hidden whitespace-nowrap text-sm text-muted-foreground md:table-cell'
+                                            title={updatedAtTitle}>
+                                            {isFolder ? "" : updatedAt}
+                                        </TableCell>
+                                    </TableRow>
+                                );
+                            })
+                        )}
+                    </TableBody>
+                </Table>
+            </div>
+        </section>
+    );
+}
+
+function useFolderRelativeTimeNow(items: ReadonlyArray<FolderPageItem>) {
+    const timestamps = React.useMemo(
+        () =>
+            items
+                .filter((item) => item.kind === "page")
+                .flatMap((item) => [
+                    parseInboxTimestamp(item.createdAt),
+                    parseInboxTimestamp(item.updatedAt),
+                ])
+                .filter((timestamp): timestamp is number => timestamp !== null),
+        [items],
+    );
+    const [now, setNow] = React.useState(() => Date.now());
+
+    React.useEffect(() => {
+        if (timestamps.length === 0) return;
+
+        const timer = window.setTimeout(
+            () => setNow(Date.now()),
+            getNextRelativeTimeUpdateDelay(timestamps, now),
+        );
+
+        return () => window.clearTimeout(timer);
+    }, [now, timestamps]);
+
+    return now;
+}
+
+function useInboxRelativeTimeNow(items: ReadonlyArray<InboxPageItem>) {
+    const timestamps = React.useMemo(
+        () =>
+            items
+                .flatMap((item) => [
+                    parseInboxTimestamp(item.createdAt),
+                    parseInboxTimestamp(item.updatedAt),
+                ])
+                .filter((timestamp): timestamp is number => timestamp !== null),
+        [items],
+    );
+    const [now, setNow] = React.useState(() => Date.now());
+
+    React.useEffect(() => {
+        if (timestamps.length === 0) return;
+
+        const timer = window.setTimeout(
+            () => setNow(Date.now()),
+            getNextRelativeTimeUpdateDelay(timestamps, now),
+        );
+
+        return () => window.clearTimeout(timer);
+    }, [now, timestamps]);
+
+    return now;
+}
+
 const Article = React.memo(function Article({
+    fontScale,
     onPinMenuRequest,
     page,
 }: {
+    fontScale: number;
     onPinMenuRequest: (request: PinMenuRequest) => void;
     page: DocPage;
 }) {
@@ -3380,7 +4932,14 @@ const Article = React.memo(function Article({
 
     return (
         <>
-            <article ref={ref} className='docs-prose'>
+            <article
+                ref={ref}
+                className='docs-prose'
+                style={
+                    {
+                        "--docs-article-font-scale": fontScale / 100,
+                    } as React.CSSProperties
+                }>
                 {blocks.map((block, index) =>
                     block.type === "html" ? (
                         <div
@@ -3393,7 +4952,6 @@ const Article = React.memo(function Article({
                     ),
                 )}
             </article>
-
             <MermaidZoomDialog
                 mermaidZoom={mermaidZoom}
                 onOpenChange={(open) => !open && setMermaidZoom(null)}
@@ -3401,6 +4959,234 @@ const Article = React.memo(function Article({
         </>
     );
 });
+
+function ArticleActiveBar({
+    docsTheme,
+    docsThemeApplying,
+    docsThemeError,
+    docsThemeLoading,
+    docsThemeOptions,
+    fontScale,
+    leftSidebarOpen,
+    leftSidebarWidth,
+    mainWidth,
+    onDocsThemeChange,
+    onDocsThemesRefresh,
+    onFontScaleChange,
+    onMainWidthChange,
+    onSettingsOpen,
+    onThemeToggle,
+    onRightSidebarToggle,
+    rightSidebarAvailable,
+    rightSidebarOpen,
+    theme,
+}: {
+    docsTheme: string;
+    docsThemeApplying: boolean;
+    docsThemeError: string;
+    docsThemeLoading: boolean;
+    docsThemeOptions: DocsThemeOption[];
+    fontScale: number;
+    leftSidebarOpen: boolean;
+    leftSidebarWidth: number;
+    mainWidth: MainWidthSetting;
+    onDocsThemeChange: (theme: string) => void;
+    onDocsThemesRefresh: () => void;
+    onFontScaleChange: (value: number) => void;
+    onMainWidthChange: (value: MainWidthSetting) => void;
+    onSettingsOpen: () => void;
+    onThemeToggle: () => void;
+    onRightSidebarToggle: () => void;
+    rightSidebarAvailable: boolean;
+    rightSidebarOpen: boolean;
+    theme: Theme;
+}) {
+    const [openMenu, setOpenMenu] = React.useState<"theme" | "width" | null>(null);
+
+    React.useEffect(() => {
+        if (docsThemeOptions.length > 0 || docsThemeLoading || docsThemeApplying || docsThemeError) {
+            return;
+        }
+
+        onDocsThemesRefresh();
+    }, [
+        docsThemeApplying,
+        docsThemeError,
+        docsThemeLoading,
+        docsThemeOptions.length,
+        onDocsThemesRefresh,
+    ]);
+
+    const selectedDocsTheme = docsTheme || docsThemeOptions[0]?.name || "";
+    const activeBarStyle = {
+        "--docs-active-bar-sidebar-offset": leftSidebarOpen ? `${leftSidebarWidth}px` : "0px",
+    } as React.CSSProperties;
+    const updateOpenMenu = React.useCallback((menu: "theme" | "width", open: boolean) => {
+        setOpenMenu((current) => {
+            if (open) return menu;
+            return current === menu ? null : current;
+        });
+    }, []);
+
+    return (
+        <footer
+            className='docs-article-active-footer'
+            data-menu-open={openMenu ? "true" : undefined}
+            style={activeBarStyle}
+            aria-label='Article controls'>
+            <div className='docs-article-active-bar'>
+                {docsThemeOptions.length > 0 ? (
+                    <Select
+                        value={selectedDocsTheme}
+                        onOpenChange={(open) => updateOpenMenu("theme", open)}
+                        onValueChange={onDocsThemeChange}
+                        disabled={docsThemeApplying}>
+                        <SelectTrigger
+                            className='docs-active-bar-select w-40'
+                            aria-label='Docs theme'>
+                            <Palette className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {docsThemeOptions.map((option) => (
+                                <SelectItem key={option.name} value={option.name}>
+                                    {option.title}
+                                    {option.requiresRestart ? " (restart)" : ""}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                ) : (
+                    <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        className='docs-active-bar-icon-button'
+                        aria-label='Load docs themes'
+                        title={docsThemeError || "Load docs themes"}
+                        disabled={docsThemeLoading}
+                        onClick={onDocsThemesRefresh}>
+                        <Palette className='h-3.5 w-3.5' />
+                    </Button>
+                )}
+
+                <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    className='docs-active-bar-icon-button'
+                    aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+                    title={theme === "dark" ? "Light mode" : "Dark mode"}
+                    onClick={onThemeToggle}>
+                    {theme === "dark" ? (
+                        <Sun className='h-3.5 w-3.5' />
+                    ) : (
+                        <Moon className='h-3.5 w-3.5' />
+                    )}
+                </Button>
+
+                <Separator orientation='vertical' className='docs-active-bar-separator' />
+
+                <Select
+                    value={mainWidth}
+                    onOpenChange={(open) => updateOpenMenu("width", open)}
+                    onValueChange={(value) => onMainWidthChange(value as MainWidthSetting)}>
+                    <SelectTrigger
+                        className='docs-active-bar-select w-32'
+                        aria-label='Main content width'>
+                        <Layout className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value='narrow'>Narrow</SelectItem>
+                        <SelectItem value='default'>Default</SelectItem>
+                        <SelectItem value='wide'>Wide</SelectItem>
+                        <SelectItem value='full'>Full</SelectItem>
+                    </SelectContent>
+                </Select>
+
+                <Button
+                    type='button'
+                    variant={rightSidebarOpen ? "secondary" : "ghost"}
+                    size='icon'
+                    className='docs-active-bar-icon-button'
+                    aria-label={rightSidebarOpen ? "Hide right sidebar" : "Show right sidebar"}
+                    title={rightSidebarOpen ? "Hide right sidebar" : "Show right sidebar"}
+                    disabled={!rightSidebarAvailable}
+                    onClick={onRightSidebarToggle}>
+                    <PanelRight className='h-3.5 w-3.5' />
+                </Button>
+
+                <Separator orientation='vertical' className='docs-active-bar-separator' />
+
+                <ArticleFontScaleSlider
+                    className='docs-active-bar-font-slider w-60'
+                    value={fontScale}
+                    onChange={onFontScaleChange}
+                />
+                <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    className='docs-active-bar-icon-button'
+                    aria-label='Reset article font size'
+                    title='Reset article font size'
+                    disabled={fontScale === DEFAULT_ARTICLE_FONT_SCALE}
+                    onClick={() => onFontScaleChange(DEFAULT_ARTICLE_FONT_SCALE)}>
+                    <RotateCcw className='h-3.5 w-3.5' />
+                </Button>
+
+                <Button
+                    type='button'
+                    variant='ghost'
+                    size='icon'
+                    className='docs-active-bar-icon-button'
+                    aria-label='Open settings'
+                    title='Open settings'
+                    onClick={onSettingsOpen}>
+                    <SettingsIcon className='h-3.5 w-3.5' />
+                </Button>
+            </div>
+        </footer>
+    );
+}
+
+function ArticleFontScaleSlider({
+    className,
+    onChange,
+    value,
+}: {
+    className?: string;
+    onChange: (value: number) => void;
+    value: number;
+}) {
+    const updateFromInput = React.useCallback(
+        (event: React.SyntheticEvent<HTMLInputElement>) => {
+            onChange(clampArticleFontScale(Number.parseInt(event.currentTarget.value, 10)));
+        },
+        [onChange],
+    );
+
+    return (
+        <div className={cn("docs-font-scale-slider", className)}>
+            <Type className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+            <input
+                type='range'
+                min={MIN_ARTICLE_FONT_SCALE}
+                max={MAX_ARTICLE_FONT_SCALE}
+                step={ARTICLE_FONT_SCALE_STEP}
+                value={value}
+                className='docs-font-scale-range'
+                aria-label='Article font size'
+                onChange={updateFromInput}
+                onClick={updateFromInput}
+                onInput={updateFromInput}
+                onKeyUp={updateFromInput}
+            />
+            <span className='docs-font-scale-value'>{value}%</span>
+        </div>
+    );
+}
 
 function MermaidZoomDialog({
     mermaidZoom,
@@ -3719,8 +5505,8 @@ function DocsAccordion({ data }: { data: DocsAccordionData }) {
 
     const items = data.items.map((item, index) => (
         <AccordionItem key={`${item.title}-${index}`} value={`item-${index + 1}`}>
-            <AccordionTrigger>{item.title}</AccordionTrigger>
-            <AccordionContent>
+            <AccordionTrigger className='docs-accordion-trigger'>{item.title}</AccordionTrigger>
+            <AccordionContent className='docs-accordion-panel'>
                 <div
                     className='docs-accordion-content'
                     dangerouslySetInnerHTML={{ __html: item.html }}
@@ -3734,7 +5520,7 @@ function DocsAccordion({ data }: { data: DocsAccordionData }) {
             <Accordion
                 type='multiple'
                 defaultValue={defaultValues}
-                className='not-prose w-full text-foreground'>
+                className='docs-article-accordion not-prose w-full text-foreground'>
                 {items}
             </Accordion>
         );
@@ -3745,7 +5531,7 @@ function DocsAccordion({ data }: { data: DocsAccordionData }) {
             type='single'
             collapsible
             defaultValue={defaultValues[0]}
-            className='not-prose w-full text-foreground'>
+            className='docs-article-accordion not-prose w-full text-foreground'>
             {items}
         </Accordion>
     );
@@ -3974,6 +5760,40 @@ function getPinPageKey(site: SiteKey, pagePath: string) {
     return `${site}:${normalizePath(pagePath)}`;
 }
 
+function getReadPagesStorageKey(site: SiteKey) {
+    return `${READ_PAGES_STORAGE_PREFIX}:${site}`;
+}
+
+function readReadPageUrls(site: SiteKey): ReadonlySet<string> {
+    try {
+        const value = JSON.parse(readStorageValue(getReadPagesStorageKey(site)) ?? "[]");
+        if (!Array.isArray(value)) return new Set<string>();
+
+        return new Set<string>(
+            value.filter((item): item is string => typeof item === "string").map(normalizePath),
+        );
+    } catch {
+        return new Set<string>();
+    }
+}
+
+function markPageAsRead(
+    site: SiteKey,
+    pagePath: string,
+    setReadPageUrls: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>,
+) {
+    const normalizedPath = normalizePath(pagePath);
+
+    setReadPageUrls((current) => {
+        if (current.has(normalizedPath)) return current;
+
+        const next = new Set(current);
+        next.add(normalizedPath);
+        writeStorageValue(getReadPagesStorageKey(site), JSON.stringify([...next].sort()));
+        return next;
+    });
+}
+
 function readPinnedBlocks(pageKey: string): PinnedBlock[] {
     try {
         const allPins = JSON.parse(localStorage.getItem(PIN_STORAGE_KEY) ?? "{}") as Record<
@@ -4034,11 +5854,7 @@ function readUiSettings(): DocsUiSettings {
 
         return {
             mainWidth: pickSetting(parsed.mainWidth, ["narrow", "default", "wide", "full"], "default"),
-            density: pickSetting(
-                parsed.density,
-                ["compact", "comfortable", "spacious"],
-                "comfortable",
-            ),
+            articleFontScale: readArticleFontScaleSetting(parsed.articleFontScale),
             autoHideHeader:
                 typeof parsed.autoHideHeader === "boolean"
                     ? parsed.autoHideHeader
@@ -4077,11 +5893,6 @@ function readUiSettings(): DocsUiSettings {
                 ["mono", "system", "serif"],
                 "mono",
             ),
-            codeFontSize: pickSetting(
-                parsed.codeFontSize,
-                ["12", "13", "14", "15", "16"],
-                "14",
-            ),
             codeLineHeight: pickSetting(
                 parsed.codeLineHeight,
                 ["tight", "normal", "relaxed"],
@@ -4114,6 +5925,17 @@ function readUiSettings(): DocsUiSettings {
     } catch {
         return DEFAULT_UI_SETTINGS;
     }
+}
+
+function readArticleFontScaleSetting(value: unknown) {
+    if (typeof value !== "number") return DEFAULT_ARTICLE_FONT_SCALE;
+    if (!Number.isFinite(value)) return DEFAULT_ARTICLE_FONT_SCALE;
+    return clampArticleFontScale(value);
+}
+
+function clampArticleFontScale(value: number) {
+    const stepped = Math.round(value / ARTICLE_FONT_SCALE_STEP) * ARTICLE_FONT_SCALE_STEP;
+    return clamp(stepped, MIN_ARTICLE_FONT_SCALE, MAX_ARTICLE_FONT_SCALE);
 }
 
 function pickSetting<T extends string>(value: unknown, options: readonly T[], fallback: T): T {
@@ -4389,27 +6211,201 @@ function SiteToggle({
     );
 }
 
+function isNavFolder(item: NavItem) {
+    return item.kind === "folder" || item.children.length > 0;
+}
+
+function isInboxNavItem(item: NavItem) {
+    return item.system === "inbox" || item.url === "/inbox/";
+}
+
+function flattenNavPageSourcePaths(items: NavItem[]) {
+    const sourcePaths: string[] = [];
+
+    for (const item of items) {
+        if (isInboxNavItem(item)) continue;
+
+        if (!isNavFolder(item) && item.sourcePath) {
+            sourcePaths.push(item.sourcePath);
+        }
+
+        sourcePaths.push(...flattenNavPageSourcePaths(item.children));
+    }
+
+    return sourcePaths;
+}
+
+function sourcePathRange(sourcePaths: string[], from: string, to: string) {
+    const fromIndex = sourcePaths.indexOf(from);
+    const toIndex = sourcePaths.indexOf(to);
+    if (fromIndex < 0 || toIndex < 0) return [];
+
+    const start = Math.min(fromIndex, toIndex);
+    const end = Math.max(fromIndex, toIndex);
+    return sourcePaths.slice(start, end + 1);
+}
+
+function getNavFolderPath(item: NavItem) {
+    if (item.relativePath) return item.relativePath.replace(/\/+$/, "");
+    return item.url.replace(/^\/+|\/+$/g, "");
+}
+
+function getDocsEntryTargetFromNavItem(item: NavItem): DocsEntryTarget {
+    if (isNavFolder(item)) {
+        return {
+            title: item.title,
+            kind: "folder",
+            url: item.url,
+            folderPath: getNavFolderPath(item),
+            system: item.system,
+        };
+    }
+
+    return {
+        title: item.title,
+        kind: "page",
+        url: item.url,
+        sourcePath: item.sourcePath,
+    };
+}
+
+function defaultRenameName(target: DocsEntryTarget) {
+    if (target.kind === "folder") {
+        return target.folderPath?.split("/").filter(Boolean).at(-1) ?? target.title;
+    }
+
+    const fileName = target.sourcePath?.split("/").pop() ?? target.title;
+    return fileName.endsWith(".md") ? fileName.slice(0, -".md".length) : fileName;
+}
+
+function getCreateFolderPathForTarget(target: DocsEntryTarget, site: SiteKey) {
+    if (target.kind === "folder") return target.folderPath ?? "";
+
+    const relativePath = target.sourcePath
+        ? getSiteSourceRelativePath(target.sourcePath, site)
+        : null;
+    return relativePath ? getPathDirName(relativePath) : "";
+}
+
+function writeDraggedSourcePaths(
+    event: React.DragEvent,
+    sourcePaths: string[],
+    options: { title?: string; sourceLabel?: string } = {},
+) {
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData(DOCS_DRAG_MIME, JSON.stringify(sourcePaths));
+    event.dataTransfer.setData("text/plain", sourcePaths.join("\n"));
+
+    const dragPreview = createDocsDragPreview({
+        count: sourcePaths.length,
+        sourceLabel: options.sourceLabel,
+        title: options.title ?? sourcePaths[0] ?? "Markdown file",
+    });
+
+    document.body.appendChild(dragPreview);
+    event.dataTransfer.setDragImage(dragPreview, 18, 18);
+    window.setTimeout(() => dragPreview.remove(), 0);
+}
+
+function createDocsDragPreview({
+    count,
+    sourceLabel,
+    title,
+}: {
+    count: number;
+    sourceLabel?: string;
+    title: string;
+}) {
+    const preview = document.createElement("div");
+    preview.className = "docs-drag-preview";
+
+    const icon = document.createElement("div");
+    icon.className = "docs-drag-preview-icon";
+    icon.textContent = count > 1 ? String(count) : "";
+
+    const body = document.createElement("div");
+    body.className = "docs-drag-preview-body";
+
+    const titleElement = document.createElement("div");
+    titleElement.className = "docs-drag-preview-title";
+    titleElement.textContent = count > 1 ? `${count} Markdown files` : title;
+
+    const metaElement = document.createElement("div");
+    metaElement.className = "docs-drag-preview-meta";
+    metaElement.textContent = sourceLabel ?? "Move to folder";
+
+    body.append(titleElement, metaElement);
+    preview.append(icon, body);
+
+    return preview;
+}
+
+function readDraggedSourcePaths(event: React.DragEvent) {
+    const raw = event.dataTransfer.getData(DOCS_DRAG_MIME);
+    if (!raw) return [];
+
+    try {
+        const value = JSON.parse(raw);
+        return Array.isArray(value)
+            ? value.filter((item): item is string => typeof item === "string")
+            : [];
+    } catch {
+        return [];
+    }
+}
+
 function DocsSidebar({
     currentPath,
+    currentSourcePath,
+    getDragSourcePaths,
+    inboxUnreadCount,
     items,
+    onCreateMarkdown,
+    onEntryContextMenu,
+    onMoveMarkdown,
     onNavigate,
+    onPageSelect,
     onSettingsOpen,
     onWidthChange,
     pageUrls,
+    selectedSourcePaths,
     siteTitle,
     width,
     wrapText,
 }: {
     currentPath: string;
+    currentSourcePath: string;
+    getDragSourcePaths: (sourcePath: string) => string[];
+    inboxUnreadCount: number;
     items: NavItem[];
+    onCreateMarkdown: () => void;
+    onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onMoveMarkdown: (sourcePaths: string[], destinationFolder: string) => void;
     onNavigate: (url: string) => void;
+    onPageSelect: (
+        sourcePath: string,
+        modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
+    ) => void;
     onSettingsOpen: () => void;
     onWidthChange: (width: number) => void;
     pageUrls: ReadonlySet<string>;
+    selectedSourcePaths: ReadonlySet<string>;
     siteTitle: string;
     width: number;
     wrapText: boolean;
 }) {
+    const openRootContextMenu = React.useCallback(
+        (event: React.MouseEvent) => {
+            onEntryContextMenu(event, {
+                title: "Docs",
+                kind: "root",
+                url: "/",
+                folderPath: "",
+            });
+        },
+        [onEntryContextMenu],
+    );
+
     return (
         <SidebarRoot collapsible='offcanvas' className='docs-left-sidebar'>
             <SidebarWidthResizer
@@ -4418,15 +6414,43 @@ function DocsSidebar({
                 width={width}
                 onWidthChange={onWidthChange}
             />
-            <SidebarContent>
+            <SidebarContent onContextMenu={openRootContextMenu}>
                 <SidebarGroup>
-                    <SidebarGroupLabel>Docs</SidebarGroupLabel>
+                    <SidebarGroupLabel className='justify-between gap-2 pr-1'>
+                        <span>Docs</span>
+                        <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='icon'
+                                        className='h-6 w-6 text-sidebar-foreground/70 hover:text-sidebar-accent-foreground'
+                                        aria-label='Add Markdown file'
+                                        onClick={(event) => {
+                                            event.stopPropagation();
+                                            onCreateMarkdown();
+                                        }}>
+                                        <Plus className='h-3.5 w-3.5' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side='right'>Add file</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    </SidebarGroupLabel>
                     <SidebarGroupContent>
                         <DocsSidebarNav
                             currentPath={currentPath}
+                            currentSourcePath={currentSourcePath}
+                            getDragSourcePaths={getDragSourcePaths}
+                            inboxUnreadCount={inboxUnreadCount}
                             items={items}
+                            onEntryContextMenu={onEntryContextMenu}
+                            onMoveMarkdown={onMoveMarkdown}
                             onNavigate={onNavigate}
+                            onPageSelect={onPageSelect}
                             pageUrls={pageUrls}
+                            selectedSourcePaths={selectedSourcePaths}
                             wrapText={wrapText}
                         />
                     </SidebarGroupContent>
@@ -4437,7 +6461,6 @@ function DocsSidebar({
                     <SidebarMenuItem className='flex min-w-0 items-center gap-1'>
                         <SidebarMenuButton
                             className='h-auto min-w-0 flex-1 py-2'
-                            tooltip={siteTitle}
                             onClick={() => onNavigate("/")}>
                             <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground'>
                                 S
@@ -4467,17 +6490,50 @@ function DocsSidebar({
     );
 }
 
+function InboxUnreadBadge({ count }: { count: number }) {
+    if (count <= 0) return null;
+
+    const label = count > 99 ? "99+" : String(count);
+    const title = `${count} unread inbox ${count === 1 ? "document" : "documents"}`;
+
+    return (
+        <span
+            className='ml-2 inline-flex h-5 min-w-[1.25rem] shrink-0 items-center justify-center rounded-full bg-sidebar-primary px-1.5 text-[0.625rem] font-semibold leading-none text-sidebar-primary-foreground'
+            aria-label={title}
+            title={title}>
+            {label}
+        </span>
+    );
+}
+
 function DocsSidebarNav({
     items,
     currentPath,
+    currentSourcePath,
+    getDragSourcePaths,
+    inboxUnreadCount,
+    onEntryContextMenu,
+    onMoveMarkdown,
     onNavigate,
+    onPageSelect,
     pageUrls,
+    selectedSourcePaths,
     wrapText,
 }: {
     items: NavItem[];
     currentPath: string;
+    currentSourcePath: string;
+    getDragSourcePaths: (sourcePath: string) => string[];
+    inboxUnreadCount: number;
+    onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onMoveMarkdown: (sourcePaths: string[], destinationFolder: string) => void;
     onNavigate: (url: string) => void;
+    onPageSelect: (
+        sourcePath: string,
+        modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
+    ) => void;
     pageUrls: ReadonlySet<string>;
+    selectedSourcePaths: ReadonlySet<string>;
     wrapText: boolean;
 }) {
     const { isMobile, setOpenMobile } = useSidebar();
@@ -4496,9 +6552,16 @@ function DocsSidebarNav({
                 <DocsSidebarNavItem
                     key={item.url}
                     currentPath={currentPath}
+                    currentSourcePath={currentSourcePath}
+                    getDragSourcePaths={getDragSourcePaths}
+                    inboxUnreadCount={inboxUnreadCount}
                     item={item}
+                    onEntryContextMenu={onEntryContextMenu}
+                    onMoveMarkdown={onMoveMarkdown}
                     onNavigate={navigate}
+                    onPageSelect={onPageSelect}
                     pageUrls={pageUrls}
+                    selectedSourcePaths={selectedSourcePaths}
                     wrapText={wrapText}
                 />
             ))}
@@ -4508,22 +6571,42 @@ function DocsSidebarNav({
 
 function DocsSidebarNavItem({
     currentPath,
+    currentSourcePath,
+    getDragSourcePaths,
+    inboxUnreadCount,
     item,
+    onEntryContextMenu,
+    onMoveMarkdown,
     onNavigate,
+    onPageSelect,
     pageUrls,
+    selectedSourcePaths,
     wrapText,
 }: {
     currentPath: string;
+    currentSourcePath: string;
+    getDragSourcePaths: (sourcePath: string) => string[];
+    inboxUnreadCount: number;
     item: NavItem;
+    onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onMoveMarkdown: (sourcePaths: string[], destinationFolder: string) => void;
     onNavigate: (url: string) => void;
+    onPageSelect: (
+        sourcePath: string,
+        modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
+    ) => void;
     pageUrls: ReadonlySet<string>;
+    selectedSourcePaths: ReadonlySet<string>;
     wrapText: boolean;
 }) {
-    const isActive = item.url === currentPath;
+    const isActive = navItemIsActive(item, currentPath, currentSourcePath);
     const hasChildren = item.children.length > 0;
+    const isFolder = isNavFolder(item);
+    const isSystemInbox = isInboxNavItem(item);
     const hasPage = pageUrls.has(item.url);
-    const isCurrentBranch = navItemContainsPath(item, currentPath);
+    const isCurrentBranch = navItemContainsCurrent(item, currentPath, currentSourcePath);
     const [open, setOpen] = React.useState(isCurrentBranch);
+    const [isDropTarget, setIsDropTarget] = React.useState(false);
 
     React.useEffect(() => {
         if (isCurrentBranch) setOpen(true);
@@ -4539,14 +6622,87 @@ function DocsSidebarNavItem({
         setOpen((value) => !value);
     }, [currentPath, hasPage, item.url, onNavigate, open]);
 
-    if (!hasChildren) {
+    const handlePageClick = React.useCallback(
+        (event: React.MouseEvent<HTMLButtonElement>) => {
+            if (!item.sourcePath) {
+                onNavigate(item.url);
+                return;
+            }
+
+            onPageSelect(item.sourcePath, {
+                metaKey: event.metaKey,
+                ctrlKey: event.ctrlKey,
+                shiftKey: event.shiftKey,
+            });
+
+            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+
+            onNavigate(item.url);
+        },
+        [item.sourcePath, item.url, onNavigate, onPageSelect],
+    );
+
+    const handleDragStart = React.useCallback(
+        (event: React.DragEvent<HTMLButtonElement>) => {
+            if (!item.sourcePath) return;
+            writeDraggedSourcePaths(event, getDragSourcePaths(item.sourcePath), {
+                title: item.title,
+            });
+        },
+        [getDragSourcePaths, item.sourcePath, item.title],
+    );
+
+    const handleFolderDragOver = React.useCallback((event: React.DragEvent) => {
+        if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setIsDropTarget(true);
+    }, []);
+
+    const handleFolderDragLeave = React.useCallback((event: React.DragEvent) => {
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+        setIsDropTarget(false);
+    }, []);
+
+    const handleFolderDrop = React.useCallback(
+        (event: React.DragEvent) => {
+            const sourcePaths = readDraggedSourcePaths(event);
+            if (sourcePaths.length === 0) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            setIsDropTarget(false);
+            setOpen(true);
+            onMoveMarkdown(sourcePaths, getNavFolderPath(item));
+        },
+        [item, onMoveMarkdown],
+    );
+
+    const handleContextMenu = React.useCallback(
+        (event: React.MouseEvent) => {
+            onEntryContextMenu(event, getDocsEntryTargetFromNavItem(item));
+        },
+        [item, onEntryContextMenu],
+    );
+
+    if (!isFolder) {
+        const isSelected = Boolean(item.sourcePath && selectedSourcePaths.has(item.sourcePath));
+
         return (
             <SidebarMenuItem>
                 <SidebarMenuButton
-                    className={cn(wrapText && "h-auto min-h-9 items-start py-2")}
+                    className={cn(
+                        wrapText && "h-auto min-h-9 items-start py-2",
+                        isSelected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+                    )}
+                    data-selected={isSelected ? "true" : undefined}
+                    draggable={Boolean(item.sourcePath)}
                     isActive={isActive}
-                    tooltip={item.title}
-                    onClick={() => onNavigate(item.url)}>
+                    onClick={handlePageClick}
+                    onContextMenu={handleContextMenu}
+                    onDragStart={handleDragStart}>
                     <FileText className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
                     <span
                         className={cn(
@@ -4562,12 +6718,33 @@ function DocsSidebarNavItem({
 
     const folderButton = (
         <SidebarMenuButton
-            className={cn("justify-between", wrapText && "h-auto min-h-9 items-start py-2")}
+            className={cn(
+                "justify-between",
+                wrapText && "h-auto min-h-9 items-start py-2",
+                isDropTarget && "bg-sidebar-accent text-sidebar-accent-foreground ring-2 ring-sidebar-ring",
+            )}
             isActive={isActive}
-            tooltip={item.title}
-            onClick={hasPage ? handleFolderClick : undefined}>
-            <span className='flex min-w-0 items-start gap-2'>
-                <Folder className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
+            onClick={
+                isSystemInbox
+                    ? () => onNavigate(item.url)
+                    : hasPage
+                      ? handleFolderClick
+                      : undefined
+            }
+            onContextMenu={handleContextMenu}
+            onDragLeave={handleFolderDragLeave}
+            onDragOver={handleFolderDragOver}
+            onDrop={handleFolderDrop}>
+            <span
+                className={cn(
+                    "flex min-w-0 flex-1 gap-2",
+                    wrapText ? "items-start" : "items-center",
+                )}>
+                {isSystemInbox ? (
+                    <Inbox className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
+                ) : (
+                    <Folder className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
+                )}
                 <span
                     className={cn(
                         "min-w-0",
@@ -4576,14 +6753,21 @@ function DocsSidebarNavItem({
                     {item.title}
                 </span>
             </span>
-            <ChevronRight
-                className={cn(
-                    "h-4 w-4 shrink-0 transition-transform duration-200 ease-smooth",
-                    open && "rotate-90",
-                )}
-            />
+            {isSystemInbox && <InboxUnreadBadge count={inboxUnreadCount} />}
+            {!isSystemInbox && hasChildren && (
+                <ChevronRight
+                    className={cn(
+                        "h-4 w-4 shrink-0 transition-transform duration-200 ease-smooth",
+                        open && "rotate-90",
+                    )}
+                />
+            )}
         </SidebarMenuButton>
     );
+
+    if (isSystemInbox) {
+        return <SidebarMenuItem>{folderButton}</SidebarMenuItem>;
+    }
 
     return (
         <SidebarMenuItem>
@@ -4600,9 +6784,16 @@ function DocsSidebarNavItem({
                             <DocsSidebarSubItem
                                 key={child.url}
                                 currentPath={currentPath}
+                                currentSourcePath={currentSourcePath}
+                                getDragSourcePaths={getDragSourcePaths}
+                                inboxUnreadCount={inboxUnreadCount}
                                 item={child}
+                                onEntryContextMenu={onEntryContextMenu}
+                                onMoveMarkdown={onMoveMarkdown}
                                 onNavigate={onNavigate}
+                                onPageSelect={onPageSelect}
                                 pageUrls={pageUrls}
+                                selectedSourcePaths={selectedSourcePaths}
                                 wrapText={wrapText}
                             />
                         ))}
@@ -4615,22 +6806,42 @@ function DocsSidebarNavItem({
 
 function DocsSidebarSubItem({
     currentPath,
+    currentSourcePath,
+    getDragSourcePaths,
+    inboxUnreadCount,
     item,
+    onEntryContextMenu,
+    onMoveMarkdown,
     onNavigate,
+    onPageSelect,
     pageUrls,
+    selectedSourcePaths,
     wrapText,
 }: {
     currentPath: string;
+    currentSourcePath: string;
+    getDragSourcePaths: (sourcePath: string) => string[];
+    inboxUnreadCount: number;
     item: NavItem;
+    onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onMoveMarkdown: (sourcePaths: string[], destinationFolder: string) => void;
     onNavigate: (url: string) => void;
+    onPageSelect: (
+        sourcePath: string,
+        modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
+    ) => void;
     pageUrls: ReadonlySet<string>;
+    selectedSourcePaths: ReadonlySet<string>;
     wrapText: boolean;
 }) {
-    const isActive = item.url === currentPath;
+    const isActive = navItemIsActive(item, currentPath, currentSourcePath);
     const hasChildren = item.children.length > 0;
+    const isFolder = isNavFolder(item);
+    const isSystemInbox = isInboxNavItem(item);
     const hasPage = pageUrls.has(item.url);
-    const isCurrentBranch = navItemContainsPath(item, currentPath);
+    const isCurrentBranch = navItemContainsCurrent(item, currentPath, currentSourcePath);
     const [open, setOpen] = React.useState(isCurrentBranch);
+    const [isDropTarget, setIsDropTarget] = React.useState(false);
 
     React.useEffect(() => {
         if (isCurrentBranch) setOpen(true);
@@ -4646,13 +6857,87 @@ function DocsSidebarSubItem({
         setOpen((value) => !value);
     }, [currentPath, hasPage, item.url, onNavigate, open]);
 
-    if (!hasChildren) {
+    const handlePageClick = React.useCallback(
+        (event: React.MouseEvent<HTMLButtonElement>) => {
+            if (!item.sourcePath) {
+                onNavigate(item.url);
+                return;
+            }
+
+            onPageSelect(item.sourcePath, {
+                metaKey: event.metaKey,
+                ctrlKey: event.ctrlKey,
+                shiftKey: event.shiftKey,
+            });
+
+            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+
+            onNavigate(item.url);
+        },
+        [item.sourcePath, item.url, onNavigate, onPageSelect],
+    );
+
+    const handleDragStart = React.useCallback(
+        (event: React.DragEvent<HTMLButtonElement>) => {
+            if (!item.sourcePath) return;
+            writeDraggedSourcePaths(event, getDragSourcePaths(item.sourcePath), {
+                title: item.title,
+            });
+        },
+        [getDragSourcePaths, item.sourcePath, item.title],
+    );
+
+    const handleFolderDragOver = React.useCallback((event: React.DragEvent) => {
+        if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setIsDropTarget(true);
+    }, []);
+
+    const handleFolderDragLeave = React.useCallback((event: React.DragEvent) => {
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+        setIsDropTarget(false);
+    }, []);
+
+    const handleFolderDrop = React.useCallback(
+        (event: React.DragEvent) => {
+            const sourcePaths = readDraggedSourcePaths(event);
+            if (sourcePaths.length === 0) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            setIsDropTarget(false);
+            setOpen(true);
+            onMoveMarkdown(sourcePaths, getNavFolderPath(item));
+        },
+        [item, onMoveMarkdown],
+    );
+
+    const handleContextMenu = React.useCallback(
+        (event: React.MouseEvent) => {
+            onEntryContextMenu(event, getDocsEntryTargetFromNavItem(item));
+        },
+        [item, onEntryContextMenu],
+    );
+
+    if (!isFolder) {
+        const isSelected = Boolean(item.sourcePath && selectedSourcePaths.has(item.sourcePath));
+
         return (
             <SidebarMenuSubItem>
                 <SidebarMenuSubButton
-                    className={cn(wrapText && "h-auto min-h-7 items-start py-1.5")}
+                    className={cn(
+                        wrapText && "h-auto min-h-7 items-start py-1.5",
+                        isSelected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
+                    )}
+                    data-selected={isSelected ? "true" : undefined}
+                    draggable={Boolean(item.sourcePath)}
                     isActive={isActive}
-                    onClick={() => onNavigate(item.url)}>
+                    onClick={handlePageClick}
+                    onContextMenu={handleContextMenu}
+                    onDragStart={handleDragStart}>
                     <FileText className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
                     <span
                         className={cn(
@@ -4668,11 +6953,33 @@ function DocsSidebarSubItem({
 
     const folderButton = (
         <SidebarMenuSubButton
-            className={cn("h-8 justify-between", wrapText && "h-auto min-h-8 items-start py-1.5")}
+            className={cn(
+                "h-8 justify-between",
+                wrapText && "h-auto min-h-8 items-start py-1.5",
+                isDropTarget && "bg-sidebar-accent text-sidebar-accent-foreground ring-2 ring-sidebar-ring",
+            )}
             isActive={isActive}
-            onClick={hasPage ? handleFolderClick : undefined}>
-            <span className='flex min-w-0 items-start gap-2'>
-                <Folder className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
+            onClick={
+                isSystemInbox
+                    ? () => onNavigate(item.url)
+                    : hasPage
+                      ? handleFolderClick
+                      : undefined
+            }
+            onContextMenu={handleContextMenu}
+            onDragLeave={handleFolderDragLeave}
+            onDragOver={handleFolderDragOver}
+            onDrop={handleFolderDrop}>
+            <span
+                className={cn(
+                    "flex min-w-0 flex-1 gap-2",
+                    wrapText ? "items-start" : "items-center",
+                )}>
+                {isSystemInbox ? (
+                    <Inbox className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
+                ) : (
+                    <Folder className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
+                )}
                 <span
                     className={cn(
                         "min-w-0",
@@ -4681,14 +6988,21 @@ function DocsSidebarSubItem({
                     {item.title}
                 </span>
             </span>
-            <ChevronRight
-                className={cn(
-                    "h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-smooth",
-                    open && "rotate-90",
-                )}
-            />
+            {isSystemInbox && <InboxUnreadBadge count={inboxUnreadCount} />}
+            {!isSystemInbox && hasChildren && (
+                <ChevronRight
+                    className={cn(
+                        "h-3.5 w-3.5 shrink-0 transition-transform duration-200 ease-smooth",
+                        open && "rotate-90",
+                    )}
+                />
+            )}
         </SidebarMenuSubButton>
     );
+
+    if (isSystemInbox) {
+        return <SidebarMenuSubItem>{folderButton}</SidebarMenuSubItem>;
+    }
 
     return (
         <SidebarMenuSubItem>
@@ -4705,9 +7019,16 @@ function DocsSidebarSubItem({
                             <DocsSidebarSubItem
                                 key={child.url}
                                 currentPath={currentPath}
+                                currentSourcePath={currentSourcePath}
+                                getDragSourcePaths={getDragSourcePaths}
+                                inboxUnreadCount={inboxUnreadCount}
                                 item={child}
+                                onEntryContextMenu={onEntryContextMenu}
+                                onMoveMarkdown={onMoveMarkdown}
                                 onNavigate={onNavigate}
+                                onPageSelect={onPageSelect}
                                 pageUrls={pageUrls}
+                                selectedSourcePaths={selectedSourcePaths}
                                 wrapText={wrapText}
                             />
                         ))}
@@ -4718,11 +7039,31 @@ function DocsSidebarSubItem({
     );
 }
 
-function navItemContainsPath(item: NavItem, currentPath: string): boolean {
+function navItemIsActive(item: NavItem, currentPath: string, currentSourcePath: string): boolean {
+    if (isNavFolder(item)) {
+        return currentSourcePath.endsWith("/") && navFolderMatchesSourcePath(item, currentSourcePath);
+    }
+
+    return item.sourcePath ? item.sourcePath === currentSourcePath : item.url === currentPath;
+}
+
+function navItemContainsCurrent(
+    item: NavItem,
+    currentPath: string,
+    currentSourcePath: string,
+): boolean {
     return (
-        item.url === currentPath ||
-        item.children.some((child) => navItemContainsPath(child, currentPath))
+        navItemIsActive(item, currentPath, currentSourcePath) ||
+        item.children.some((child) => navItemContainsCurrent(child, currentPath, currentSourcePath))
     );
+}
+
+function navFolderMatchesSourcePath(item: NavItem, currentSourcePath: string) {
+    const folderPath = getNavFolderPath(item);
+    const normalizedSourcePath = currentSourcePath.replace(/\\/g, "/").replace(/\/+$/, "/");
+    const expectedSuffix = folderPath ? `/docs/${folderPath}/` : "/docs/";
+
+    return normalizedSourcePath.endsWith(expectedSuffix);
 }
 
 function readRoute(): RouteState {
@@ -4784,6 +7125,115 @@ function formatEditorSaveStatus(status: EditorSaveStatus, savedAt: number | null
         minute: "2-digit",
         second: "2-digit",
     })}`;
+}
+
+const INBOX_SECOND_MS = 1000;
+const INBOX_MINUTE_MS = 60 * INBOX_SECOND_MS;
+const INBOX_HOUR_MS = 60 * INBOX_MINUTE_MS;
+const INBOX_DAY_MS = 24 * INBOX_HOUR_MS;
+const INBOX_WEEK_MS = 7 * INBOX_DAY_MS;
+const INBOX_MONTH_MS = (365 * INBOX_DAY_MS) / 12;
+const INBOX_YEAR_MS = 365 * INBOX_DAY_MS;
+
+function formatInboxDate(value?: string, now = Date.now()) {
+    const timestamp = parseInboxTimestamp(value);
+    if (timestamp === null) return "Unknown";
+
+    const diff = timestamp - now;
+    const suffix = diff > 0 ? "from now" : "ago";
+    const { amount, unit } = getInboxRelativeTimeParts(Math.abs(diff));
+
+    return `${amount}${unit} ${suffix}`;
+}
+
+function formatInboxAbsoluteDate(value?: string) {
+    const timestamp = parseInboxTimestamp(value);
+    if (timestamp === null) return undefined;
+
+    return new Date(timestamp).toLocaleString([], {
+        year: "numeric",
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+    });
+}
+
+function parseInboxTimestamp(value?: string) {
+    if (!value) return null;
+
+    const timestamp = Date.parse(value);
+    return Number.isNaN(timestamp) ? null : timestamp;
+}
+
+function getInboxRelativeTimeParts(diff: number) {
+    if (diff < INBOX_MINUTE_MS) {
+        return {
+            amount: Math.max(1, Math.floor(diff / INBOX_SECOND_MS)),
+            unit: "s",
+        };
+    }
+
+    if (diff < INBOX_HOUR_MS) {
+        return {
+            amount: Math.max(1, Math.floor(diff / INBOX_MINUTE_MS)),
+            unit: "m",
+        };
+    }
+
+    if (diff < INBOX_DAY_MS) {
+        return {
+            amount: Math.max(1, Math.floor(diff / INBOX_HOUR_MS)),
+            unit: "h",
+        };
+    }
+
+    if (diff < INBOX_WEEK_MS) {
+        return {
+            amount: Math.max(1, Math.floor(diff / INBOX_DAY_MS)),
+            unit: "d",
+        };
+    }
+
+    if (diff < INBOX_MONTH_MS) {
+        return {
+            amount: Math.max(1, Math.floor(diff / INBOX_WEEK_MS)),
+            unit: "w",
+        };
+    }
+
+    if (diff < INBOX_YEAR_MS) {
+        return {
+            amount: Math.max(1, Math.floor(diff / INBOX_MONTH_MS)),
+            unit: "mo",
+        };
+    }
+
+    return {
+        amount: Math.max(1, Math.floor(diff / INBOX_YEAR_MS)),
+        unit: "y",
+    };
+}
+
+function getNextRelativeTimeUpdateDelay(timestamps: ReadonlyArray<number>, now: number) {
+    let nextDelay = INBOX_DAY_MS;
+
+    for (const timestamp of timestamps) {
+        const diff = Math.abs(timestamp - now);
+
+        if (timestamp > now || diff < INBOX_MINUTE_MS) {
+            nextDelay = Math.min(nextDelay, INBOX_SECOND_MS);
+        } else if (diff < INBOX_HOUR_MS) {
+            nextDelay = Math.min(nextDelay, INBOX_MINUTE_MS - (diff % INBOX_MINUTE_MS));
+        } else if (diff < INBOX_DAY_MS) {
+            nextDelay = Math.min(nextDelay, INBOX_HOUR_MS - (diff % INBOX_HOUR_MS));
+        } else {
+            nextDelay = Math.min(nextDelay, INBOX_DAY_MS - (diff % INBOX_DAY_MS));
+        }
+    }
+
+    return Math.max(INBOX_SECOND_MS, Math.ceil(nextDelay));
 }
 
 function highlightMarkdown(value: string) {

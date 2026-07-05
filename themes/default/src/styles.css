@@ -261,40 +261,41 @@
         color: hsl(var(--sidebar-accent-foreground));
     }
 
+    [data-sidebar="menu-button"][data-selected="true"],
+    [data-sidebar="menu-button"][data-selected="true"]:hover,
+    [data-sidebar="menu-sub-button"][data-selected="true"],
+    [data-sidebar="menu-sub-button"][data-selected="true"]:hover {
+        background-color: hsl(var(--sidebar-accent));
+        color: hsl(var(--sidebar-accent-foreground));
+        font-weight: 500;
+    }
+
+    [data-sidebar="menu-button"][data-selected="true"] svg,
+    [data-sidebar="menu-button"][data-selected="true"]:hover svg,
+    [data-sidebar="menu-sub-button"][data-selected="true"] svg,
+    [data-sidebar="menu-sub-button"][data-selected="true"]:hover svg {
+        color: hsl(var(--sidebar-accent-foreground));
+    }
+
     .docs-prose {
-        @apply prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-m-20 prose-headings:font-semibold prose-headings:tracking-normal prose-a:font-medium prose-a:text-primary prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:text-sm prose-code:font-medium prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:border prose-pre:bg-card prose-pre:p-4 prose-pre:text-card-foreground;
-    }
-
-    .docs-density-compact .docs-prose {
-        @apply text-sm leading-6;
-    }
-
-    .docs-density-spacious .docs-prose {
-        @apply text-base leading-8;
-    }
-
-    .docs-density-compact .docs-prose p,
-    .docs-density-compact .docs-prose ul,
-    .docs-density-compact .docs-prose ol {
-        @apply my-3;
-    }
-
-    .docs-density-spacious .docs-prose p,
-    .docs-density-spacious .docs-prose ul,
-    .docs-density-spacious .docs-prose ol {
-        @apply my-6;
-    }
-
-    .docs-prose > .contents > h1 {
-        @apply hidden;
+        @apply prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-m-20 prose-headings:font-semibold prose-headings:tracking-normal prose-a:font-medium prose-a:text-primary prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:font-medium prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:border prose-pre:bg-card prose-pre:p-4 prose-pre:text-card-foreground;
+        --docs-article-body-font-size: calc(1rem * var(--docs-article-font-scale, 1));
+        --docs-article-small-font-size: calc(0.875rem * var(--docs-article-font-scale, 1));
+        --docs-article-code-font-size: calc(0.9375rem * var(--docs-article-font-scale, 1));
+        font-size: var(--docs-article-body-font-size);
+        line-height: 1.75;
     }
 
     .docs-prose > .contents > h2 {
-        @apply mt-10 border-b pb-2 text-2xl;
+        @apply mt-10 border-b pb-2;
+        font-size: 1.5em;
+        line-height: 1.3333333;
     }
 
     .docs-prose > .contents > h3 {
-        @apply mt-8 text-xl;
+        @apply mt-8;
+        font-size: 1.25em;
+        line-height: 1.4;
     }
 
     .docs-prose img {
@@ -309,26 +310,156 @@
 
     .docs-prose figure.docs-code-block {
         @apply my-6 overflow-hidden rounded-md border bg-card text-card-foreground;
+        font-size: var(--docs-article-body-font-size);
     }
 
     .docs-prose .docs-code-block-header {
-        @apply m-0 flex min-h-10 items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2 text-xs text-muted-foreground;
+        @apply m-0 flex min-h-10 items-center justify-between gap-2 border-b bg-muted/40 px-3 py-2 text-muted-foreground;
+        font-size: var(--docs-article-small-font-size);
+        line-height: 1.4;
     }
 
     .docs-prose .docs-code-block-label {
         @apply min-w-0 truncate font-mono font-medium uppercase tracking-normal;
+        font-size: var(--docs-article-small-font-size);
+        line-height: 1.4;
     }
 
     .docs-prose .docs-code-copy {
-        @apply inline-flex h-7 shrink-0 items-center justify-center rounded-md border bg-background px-2 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
+        @apply inline-flex h-7 shrink-0 items-center justify-center rounded-md border bg-background px-2 font-medium text-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
+        font-size: var(--docs-article-small-font-size);
     }
 
     .docs-prose .docs-code-copy[data-copied="true"] {
         @apply text-muted-foreground;
     }
 
+    .docs-article-active-footer {
+        @apply fixed bottom-3 left-3 right-3 z-40 flex h-10 items-center justify-center;
+    }
+
+    @media (min-width: 1024px) {
+        .docs-article-active-footer {
+            left: calc(var(--docs-active-bar-sidebar-offset, 0px) + 0.75rem);
+        }
+    }
+
+    .docs-article-active-footer::before {
+        @apply absolute left-1/2 top-1/2 h-px w-20 -translate-x-1/2 -translate-y-1/2 rounded-full bg-border;
+        content: "";
+    }
+
+    .docs-article-active-bar {
+        @apply relative z-10 flex h-9 w-full min-w-0 items-center gap-1 overflow-hidden rounded-md border bg-background/95 px-2 text-foreground opacity-0 shadow-sm backdrop-blur transition-[opacity,transform] duration-150 ease-smooth;
+        justify-content: flex-start;
+        overscroll-behavior: contain;
+        transform: translateY(0.25rem);
+    }
+
+    @media (min-width: 1024px) {
+        .docs-article-active-bar {
+            justify-content: center;
+        }
+    }
+
+    .docs-article-active-footer:hover .docs-article-active-bar,
+    .docs-article-active-footer:focus-within .docs-article-active-bar,
+    .docs-article-active-footer[data-menu-open="true"] .docs-article-active-bar {
+        @apply opacity-100;
+        transform: translateY(0);
+    }
+
+    .docs-active-bar-select {
+        @apply h-7 shrink-0 gap-1.5 rounded-md border-0 bg-transparent px-2 text-xs shadow-none hover:bg-accent focus:ring-0 focus:ring-offset-0;
+    }
+
+    .docs-active-bar-icon-button {
+        @apply h-7 w-7 shrink-0;
+    }
+
+    .docs-active-bar-separator {
+        @apply mx-1 hidden h-5 shrink-0 sm:block;
+    }
+
+    .docs-active-bar-font-slider {
+        @apply max-w-[min(18rem,44vw)] shrink;
+    }
+
+    .docs-font-scale-slider {
+        @apply flex min-w-0 items-center gap-2;
+    }
+
+    .docs-font-scale-range {
+        -webkit-appearance: none;
+        appearance: none;
+        background: transparent;
+        height: 1.25rem;
+        min-width: 0;
+        width: 100%;
+    }
+
+    .docs-font-scale-range::-webkit-slider-runnable-track {
+        @apply rounded-full bg-muted;
+        height: 0.25rem;
+    }
+
+    .docs-font-scale-range::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        appearance: none;
+        @apply rounded-full border-2 border-background bg-primary shadow-sm;
+        height: 0.875rem;
+        margin-top: -0.3125rem;
+        width: 0.875rem;
+    }
+
+    .docs-font-scale-range::-moz-range-track {
+        @apply rounded-full bg-muted;
+        height: 0.25rem;
+    }
+
+    .docs-font-scale-range::-moz-range-thumb {
+        @apply rounded-full border-2 border-background bg-primary shadow-sm;
+        height: 0.875rem;
+        width: 0.875rem;
+    }
+
+    .docs-font-scale-range:focus-visible {
+        @apply outline-none;
+    }
+
+    .docs-font-scale-range:focus-visible::-webkit-slider-thumb {
+        @apply ring-2 ring-ring ring-offset-2 ring-offset-background;
+    }
+
+    .docs-font-scale-range:focus-visible::-moz-range-thumb {
+        @apply ring-2 ring-ring ring-offset-2 ring-offset-background;
+    }
+
+    .docs-font-scale-value {
+        @apply w-10 shrink-0 text-right text-xs font-medium text-muted-foreground;
+    }
+
+    .docs-prose :where(code):not(:where(pre code, .not-prose, .not-prose *)) {
+        font-size: 1em;
+    }
+
+    .docs-prose .docs-article-accordion {
+        font-size: var(--docs-article-body-font-size);
+    }
+
+    .docs-prose .docs-accordion-trigger {
+        font-size: var(--docs-article-small-font-size);
+        line-height: 1.5;
+    }
+
+    .docs-prose .docs-accordion-panel {
+        font-size: var(--docs-article-small-font-size);
+    }
+
     .docs-accordion-content {
-        @apply text-sm leading-7 text-foreground;
+        @apply text-foreground;
+        font-size: inherit;
+        line-height: 1.75;
     }
 
     .docs-accordion-content > :first-child {
@@ -365,7 +496,8 @@
     }
 
     .docs-accordion-content code {
-        @apply rounded bg-muted px-1 py-0.5 font-mono text-sm font-medium;
+        @apply rounded bg-muted px-1 py-0.5 font-mono font-medium;
+        font-size: inherit;
     }
 
     .docs-prose .docs-code-block pre.hljs {
@@ -374,14 +506,14 @@
         background: #111111;
         color: #c9d1d9;
         font-family: var(--docs-code-font-family);
-        font-size: var(--docs-code-font-size, 14px);
-        line-height: var(--docs-code-line-height, 1.6);
+        font-size: var(--docs-article-code-font-size) !important;
+        line-height: var(--docs-code-line-height, 1.6) !important;
     }
 
     .docs-prose .docs-code-block pre.hljs code {
         @apply bg-transparent p-0 font-normal text-inherit;
         font-family: inherit;
-        font-size: inherit;
+        font-size: var(--docs-article-code-font-size) !important;
         line-height: inherit;
     }
 
@@ -489,6 +621,7 @@
         font-feature-settings:
             "liga" 0,
             "calt" 0;
+        font-variant-ligatures: none;
         font-kerning: none;
         font-synthesis: none;
         letter-spacing: 0;
@@ -499,7 +632,12 @@
     .docs-markdown-editor-highlight code {
         @apply block bg-transparent p-0 font-normal leading-6;
         font-family: var(--docs-editor-font);
+        font-feature-settings: inherit !important;
+        font-variant-ligatures: inherit !important;
+        font-kerning: inherit !important;
+        font-synthesis: inherit !important;
         font-size: inherit;
+        letter-spacing: inherit !important;
         line-height: inherit;
         min-width: 100%;
         transform-origin: top left;
@@ -508,9 +646,14 @@
 
     .docs-markdown-editor-highlight span {
         font-family: inherit !important;
+        font-feature-settings: inherit !important;
+        font-variant-ligatures: inherit !important;
+        font-kerning: inherit !important;
+        font-synthesis: inherit !important;
         font-size: inherit !important;
         font-style: normal !important;
         font-weight: 400 !important;
+        letter-spacing: inherit !important;
         line-height: inherit !important;
     }
 
@@ -522,6 +665,7 @@
         font-feature-settings:
             "liga" 0,
             "calt" 0;
+        font-variant-ligatures: none;
         font-kerning: none;
         font-synthesis: none;
         letter-spacing: 0;
@@ -561,7 +705,8 @@
     }
 
     .docs-prose .docs-math-placeholder {
-        @apply font-mono text-sm text-muted-foreground;
+        @apply font-mono text-muted-foreground;
+        font-size: var(--docs-article-small-font-size);
     }
 
     .docs-prose .docs-math-inline {
@@ -570,6 +715,41 @@
 
     .docs-prose .docs-math-inline .katex {
         white-space: normal;
+    }
+
+    .docs-prose :where(ul, ol).docs-task-list {
+        @apply list-none pl-0;
+    }
+
+    .docs-prose :where(ul, ol).docs-task-list > li {
+        @apply my-1;
+    }
+
+    .docs-prose :where(ul, ol).docs-task-list > li:not(.docs-task-item) {
+        display: list-item;
+        list-style-type: disc;
+        margin-left: 1.5em;
+        padding-left: 0.25em;
+    }
+
+    .docs-prose :where(ul, ol).docs-task-list > li > p {
+        @apply my-0;
+    }
+
+    .docs-prose .docs-task-item {
+        @apply list-none;
+    }
+
+    .docs-prose .docs-task-item::marker {
+        content: "";
+    }
+
+    .docs-prose .docs-task-item > p {
+        @apply my-0;
+    }
+
+    .docs-prose .docs-task-checkbox {
+        @apply relative top-[0.15em] mr-2 h-4 w-4 shrink-0 accent-primary;
     }
 
     .docs-prose .docs-mermaid-zoomable {
@@ -733,6 +913,37 @@
 
     .docs-pin-context-menu-item {
         @apply flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground;
+    }
+
+    .docs-pin-context-menu-item:disabled {
+        @apply pointer-events-none opacity-50;
+    }
+
+    .docs-drag-preview {
+        @apply pointer-events-none fixed z-50 flex max-w-72 items-center gap-2 rounded-md border bg-popover px-2.5 py-2 text-popover-foreground shadow-lg;
+        left: -10000px;
+        top: -10000px;
+    }
+
+    .docs-drag-preview-icon {
+        @apply flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-semibold text-primary-foreground;
+    }
+
+    .docs-drag-preview-icon:empty::before {
+        content: "";
+        @apply block h-3.5 w-2.5 rounded-[2px] border border-primary-foreground/90;
+    }
+
+    .docs-drag-preview-body {
+        @apply min-w-0;
+    }
+
+    .docs-drag-preview-title {
+        @apply truncate text-sm font-medium leading-4;
+    }
+
+    .docs-drag-preview-meta {
+        @apply mt-0.5 truncate text-xs text-muted-foreground;
     }
 
     @keyframes docs-pin-flash {
@@ -913,4 +1124,19 @@
     --docs-code-addition-bg: #29350f;
     --docs-code-deletion-fg: #f92672;
     --docs-code-deletion-bg: #3d1025;
+}
+
+.docs-code-theme-dracula {
+    --docs-code-comment: #6272a4;
+    --docs-code-keyword: #ff79c6;
+    --docs-code-title: #50fa7b;
+    --docs-code-constant: #bd93f9;
+    --docs-code-string: #f1fa8c;
+    --docs-code-variable: #8be9fd;
+    --docs-code-tag: #ff79c6;
+    --docs-code-meta: #6272a4;
+    --docs-code-addition-fg: #50fa7b;
+    --docs-code-addition-bg: #1f4a2d;
+    --docs-code-deletion-fg: #ff5555;
+    --docs-code-deletion-bg: #4a242a;
 }
