@@ -1069,3 +1069,114 @@ html body .docs-accordion-content li {
     font-size: inherit;
     line-height: 1.5;
 }
+
+/* Sonner toast layout */
+html body .docs-toaster[data-sonner-toaster][data-sonner-theme] {
+    --docs-toast-bg: var(--github-canvas-overlay);
+    --docs-toast-fg: var(--github-fg-default);
+    --docs-toast-muted-fg: var(--github-fg-muted);
+    --docs-toast-border: var(--github-border-default);
+    --docs-toast-action-bg: var(--github-accent-emphasis);
+    --docs-toast-action-fg: var(--github-fg-on-emphasis);
+    --docs-toast-cancel-bg: var(--github-button-bg);
+    --docs-toast-cancel-fg: var(--github-fg-default);
+    --docs-toast-close-bg: var(--github-canvas-overlay);
+    --docs-toast-close-fg: var(--github-fg-muted);
+    --docs-toast-close-hover-bg: var(--github-button-hover-bg);
+    --docs-toast-close-hover-fg: var(--github-fg-default);
+    --docs-toast-success: var(--github-success-fg);
+    --docs-toast-info: var(--github-accent-fg);
+    --docs-toast-warning: var(--github-attention-fg);
+    --docs-toast-error: var(--github-danger-fg);
+    --docs-toast-radius: var(--github-radius);
+    --docs-toast-shadow: var(--github-shadow-floating);
+}
+
+/* Task list layout */
+html body .docs-prose :where(ul, ol).docs-task-list {
+    --docs-task-checkbox-bg: var(--github-canvas-inset);
+    --docs-task-checkbox-border: var(--github-border-default);
+    --docs-task-checkbox-checked-bg: var(--github-success-emphasis);
+    --docs-task-checkbox-checked-border: var(--github-success-emphasis);
+    --docs-task-checkbox-check: #ffffff;
+    --docs-task-checkbox-radius: 0.25rem;
+    --docs-task-checkbox-size: 1rem;
+    --docs-task-item-gap: 0.625rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding-left: 0;
+    list-style: none;
+}
+
+html body .docs-prose :where(ul, ol).docs-task-list > li {
+    margin-block: 0;
+}
+
+html body .docs-prose .docs-task-item {
+    display: block;
+    padding-left: 0;
+    list-style: none;
+}
+
+html body .docs-prose .docs-task-item::marker {
+    content: "";
+}
+
+html body .docs-prose .docs-task-item > p {
+    display: grid;
+    grid-template-columns: var(--docs-task-checkbox-size) minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--docs-task-item-gap);
+    min-height: 1.5em;
+    margin: 0;
+}
+
+html body .docs-prose .docs-task-item > :not(p:first-child) {
+    margin-left: calc(var(--docs-task-checkbox-size) + var(--docs-task-item-gap));
+}
+
+html body .docs-prose .docs-task-checkbox {
+    position: relative;
+    top: auto !important;
+    display: grid !important;
+    grid-column: 1;
+    align-self: center;
+    justify-self: center;
+    width: var(--docs-task-checkbox-size);
+    height: var(--docs-task-checkbox-size);
+    margin: 0 !important;
+    padding: 0;
+    border: 1px solid var(--docs-task-checkbox-border);
+    border-radius: var(--docs-task-checkbox-radius);
+    background-color: var(--docs-task-checkbox-bg) !important;
+    background-image: none !important;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+    opacity: 1;
+    vertical-align: middle !important;
+}
+
+html body .docs-prose .docs-task-checkbox:checked {
+    border-color: var(--docs-task-checkbox-checked-border);
+    background-color: var(--docs-task-checkbox-checked-bg) !important;
+    background-image: none !important;
+}
+
+html body .docs-prose .docs-task-checkbox::before {
+    width: 0.35rem;
+    height: 0.625rem;
+    margin-top: -0.125rem;
+    border-color: var(--docs-task-checkbox-check);
+    border-style: solid;
+    border-width: 0 0.125rem 0.125rem 0;
+    content: "";
+    transform: rotate(45deg) scale(0);
+    transform-origin: center;
+    transition: transform 120ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+html body .docs-prose .docs-task-checkbox:checked::before {
+    transform: rotate(45deg) scale(1);
+}

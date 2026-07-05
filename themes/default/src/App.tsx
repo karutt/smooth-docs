@@ -105,12 +105,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Toggle } from "@/components/ui/toggle";
 import type { AllDocsData, DocPage, DocsData, NavItem, SiteKey } from "@/types";
 import { cn } from "@/lib/utils";
-import hljs from "highlight.js/lib/core";
-import markdown from "highlight.js/lib/languages/markdown";
 import "katex/dist/katex.min.css";
 import { toast } from "sonner";
-
-hljs.registerLanguage("markdown", markdown);
 
 type Theme = "dark" | "light";
 
@@ -1471,8 +1467,12 @@ export function App() {
 
             const plainPrimary = primary && !event.altKey && !event.shiftKey;
             const editableTarget = isEditableShortcutTarget(event.target);
+            const markdownEditorTarget = isMarkdownEditorShortcutTarget(event.target);
 
             if (plainPrimary && code === "KeyK") {
+                if (markdownEditorTarget) {
+                    return;
+                }
                 event.preventDefault();
                 setCommandOpen((open) => !open);
                 return;
@@ -4241,21 +4241,7 @@ function MarkdownEditor({
     value: string;
     wrapText: boolean;
 }) {
-    const textareaRef = React.useRef<HTMLTextAreaElement>(null);
-    const highlightRef = React.useRef<HTMLElement>(null);
     const lineCount = React.useMemo(() => value.split(/\r?\n/).length, [value]);
-    const highlightedMarkdown = React.useMemo(() => highlightMarkdown(value), [value]);
-    const syncHighlightScroll = React.useCallback(() => {
-        const textarea = textareaRef.current;
-        const highlight = highlightRef.current;
-        if (!textarea || !highlight) return;
-
-        highlight.style.transform = `translate(${-textarea.scrollLeft}px, ${-textarea.scrollTop}px)`;
-    }, []);
-
-    React.useEffect(() => {
-        syncHighlightScroll();
-    }, [syncHighlightScroll, value]);
 
     return (
         <section
@@ -4278,16 +4264,7 @@ function MarkdownEditor({
                 </div>
             </div>
             <div className={cn("docs-markdown-editor", wrapText && "docs-markdown-editor--wrap")}>
-                <pre
-                    aria-hidden='true'
-                    className='docs-markdown-editor-highlight hljs language-markdown'>
-                    <code
-                        ref={highlightRef}
-                        dangerouslySetInnerHTML={{ __html: highlightedMarkdown }}
-                    />
-                </pre>
                 <textarea
-                    ref={textareaRef}
                     className='docs-markdown-editor-input'
                     value={value}
                     autoCapitalize='off'
@@ -4295,7 +4272,6 @@ function MarkdownEditor({
                     autoCorrect='off'
                     wrap={wrapText ? "soft" : "off"}
                     onChange={(event) => onChange(event.target.value)}
-                    onScroll={syncHighlightScroll}
                     onKeyDown={(event) => {
                         if (
                             (event.metaKey || event.ctrlKey) &&
@@ -6778,27 +6754,29 @@ function DocsSidebarNavItem({
                     <CollapsibleTrigger asChild>{folderButton}</CollapsibleTrigger>
                 )}
 
-                <CollapsibleContent className='docs-collapsible-content'>
-                    <SidebarMenuSub>
-                        {item.children.map((child) => (
-                            <DocsSidebarSubItem
-                                key={child.url}
-                                currentPath={currentPath}
-                                currentSourcePath={currentSourcePath}
-                                getDragSourcePaths={getDragSourcePaths}
-                                inboxUnreadCount={inboxUnreadCount}
-                                item={child}
-                                onEntryContextMenu={onEntryContextMenu}
-                                onMoveMarkdown={onMoveMarkdown}
-                                onNavigate={onNavigate}
-                                onPageSelect={onPageSelect}
-                                pageUrls={pageUrls}
-                                selectedSourcePaths={selectedSourcePaths}
-                                wrapText={wrapText}
-                            />
-                        ))}
-                    </SidebarMenuSub>
-                </CollapsibleContent>
+                {hasChildren && (
+                    <CollapsibleContent className='docs-collapsible-content'>
+                        <SidebarMenuSub>
+                            {item.children.map((child) => (
+                                <DocsSidebarSubItem
+                                    key={child.url}
+                                    currentPath={currentPath}
+                                    currentSourcePath={currentSourcePath}
+                                    getDragSourcePaths={getDragSourcePaths}
+                                    inboxUnreadCount={inboxUnreadCount}
+                                    item={child}
+                                    onEntryContextMenu={onEntryContextMenu}
+                                    onMoveMarkdown={onMoveMarkdown}
+                                    onNavigate={onNavigate}
+                                    onPageSelect={onPageSelect}
+                                    pageUrls={pageUrls}
+                                    selectedSourcePaths={selectedSourcePaths}
+                                    wrapText={wrapText}
+                                />
+                            ))}
+                        </SidebarMenuSub>
+                    </CollapsibleContent>
+                )}
             </Collapsible>
         </SidebarMenuItem>
     );
@@ -7013,27 +6991,29 @@ function DocsSidebarSubItem({
                     <CollapsibleTrigger asChild>{folderButton}</CollapsibleTrigger>
                 )}
 
-                <CollapsibleContent className='docs-collapsible-content'>
-                    <SidebarMenuSub className='mx-2'>
-                        {item.children.map((child) => (
-                            <DocsSidebarSubItem
-                                key={child.url}
-                                currentPath={currentPath}
-                                currentSourcePath={currentSourcePath}
-                                getDragSourcePaths={getDragSourcePaths}
-                                inboxUnreadCount={inboxUnreadCount}
-                                item={child}
-                                onEntryContextMenu={onEntryContextMenu}
-                                onMoveMarkdown={onMoveMarkdown}
-                                onNavigate={onNavigate}
-                                onPageSelect={onPageSelect}
-                                pageUrls={pageUrls}
-                                selectedSourcePaths={selectedSourcePaths}
-                                wrapText={wrapText}
-                            />
-                        ))}
-                    </SidebarMenuSub>
-                </CollapsibleContent>
+                {hasChildren && (
+                    <CollapsibleContent className='docs-collapsible-content'>
+                        <SidebarMenuSub className='mx-2'>
+                            {item.children.map((child) => (
+                                <DocsSidebarSubItem
+                                    key={child.url}
+                                    currentPath={currentPath}
+                                    currentSourcePath={currentSourcePath}
+                                    getDragSourcePaths={getDragSourcePaths}
+                                    inboxUnreadCount={inboxUnreadCount}
+                                    item={child}
+                                    onEntryContextMenu={onEntryContextMenu}
+                                    onMoveMarkdown={onMoveMarkdown}
+                                    onNavigate={onNavigate}
+                                    onPageSelect={onPageSelect}
+                                    pageUrls={pageUrls}
+                                    selectedSourcePaths={selectedSourcePaths}
+                                    wrapText={wrapText}
+                                />
+                            ))}
+                        </SidebarMenuSub>
+                    </CollapsibleContent>
+                )}
             </Collapsible>
         </SidebarMenuSubItem>
     );
@@ -7236,28 +7216,6 @@ function getNextRelativeTimeUpdateDelay(timestamps: ReadonlyArray<number>, now: 
     return Math.max(INBOX_SECOND_MS, Math.ceil(nextDelay));
 }
 
-function highlightMarkdown(value: string) {
-    const source = value.length > 0 ? value : " ";
-
-    try {
-        return hljs.highlight(source, {
-            language: "markdown",
-            ignoreIllegals: true,
-        }).value;
-    } catch {
-        return escapeHtml(source);
-    }
-}
-
-function escapeHtml(value: string) {
-    return value
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;")
-        .replace(/"/g, "&quot;")
-        .replace(/'/g, "&#39;");
-}
-
 function normalizePath(pathname: string) {
     if (!pathname || pathname === "/index.html") return "/";
     const clean = pathname.replace(/\/index\.html$/, "/");
@@ -7358,6 +7316,11 @@ function isEditableShortcutTarget(target: EventTarget | null) {
 
     const editable = target.closest("input, textarea, select, [contenteditable='true']");
     return Boolean(editable);
+}
+
+function isMarkdownEditorShortcutTarget(target: EventTarget | null) {
+    if (!(target instanceof Element)) return false;
+    return Boolean(target.closest(".docs-markdown-editor"));
 }
 
 function getInitialTheme(): Theme {

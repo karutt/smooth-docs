@@ -277,6 +277,160 @@
         color: hsl(var(--sidebar-accent-foreground));
     }
 
+    .docs-toaster[data-sonner-toaster][data-sonner-theme] {
+        --docs-toast-bg: hsl(var(--popover));
+        --docs-toast-fg: hsl(var(--popover-foreground));
+        --docs-toast-muted-fg: hsl(var(--muted-foreground));
+        --docs-toast-border: hsl(var(--border));
+        --docs-toast-action-bg: hsl(var(--primary));
+        --docs-toast-action-fg: hsl(var(--primary-foreground));
+        --docs-toast-cancel-bg: hsl(var(--muted));
+        --docs-toast-cancel-fg: hsl(var(--foreground));
+        --docs-toast-close-bg: hsl(var(--popover));
+        --docs-toast-close-fg: hsl(var(--muted-foreground));
+        --docs-toast-close-hover-bg: hsl(var(--accent));
+        --docs-toast-close-hover-fg: hsl(var(--accent-foreground));
+        --docs-toast-success: hsl(var(--primary));
+        --docs-toast-info: hsl(var(--primary));
+        --docs-toast-warning: hsl(38 92% 50%);
+        --docs-toast-error: hsl(var(--destructive));
+        --docs-toast-radius: calc(var(--radius) + 0.125rem);
+        --docs-toast-shadow: 0 18px 48px hsl(var(--foreground) / 12%);
+        --border-radius: var(--docs-toast-radius);
+        --normal-bg: var(--docs-toast-bg);
+        --normal-bg-hover: var(--docs-toast-close-hover-bg);
+        --normal-border: var(--docs-toast-border);
+        --normal-border-hover: color-mix(in srgb, var(--docs-toast-border) 72%, var(--docs-toast-fg));
+        --normal-text: var(--docs-toast-fg);
+        --success-bg: color-mix(in srgb, var(--docs-toast-success) 14%, var(--docs-toast-bg));
+        --success-border: color-mix(in srgb, var(--docs-toast-success) 36%, var(--docs-toast-border));
+        --success-text: var(--docs-toast-success);
+        --info-bg: color-mix(in srgb, var(--docs-toast-info) 12%, var(--docs-toast-bg));
+        --info-border: color-mix(in srgb, var(--docs-toast-info) 32%, var(--docs-toast-border));
+        --info-text: var(--docs-toast-info);
+        --warning-bg: color-mix(in srgb, var(--docs-toast-warning) 12%, var(--docs-toast-bg));
+        --warning-border: color-mix(in srgb, var(--docs-toast-warning) 32%, var(--docs-toast-border));
+        --warning-text: var(--docs-toast-warning);
+        --error-bg: color-mix(in srgb, var(--docs-toast-error) 12%, var(--docs-toast-bg));
+        --error-border: color-mix(in srgb, var(--docs-toast-error) 32%, var(--docs-toast-border));
+        --error-text: var(--docs-toast-error);
+        font-family: inherit;
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] {
+        align-items: center;
+        gap: 0.75rem;
+        min-height: 2.75rem;
+        padding: 0.75rem 0.875rem;
+        border-color: var(--docs-toast-border);
+        border-radius: var(--docs-toast-radius);
+        background: var(--docs-toast-bg);
+        color: var(--docs-toast-fg);
+        box-shadow: var(--docs-toast-shadow);
+        font-size: 0.875rem;
+        line-height: 1.4;
+    }
+
+    .docs-toaster [data-sonner-toast]:focus-visible {
+        box-shadow:
+            var(--docs-toast-shadow),
+            0 0 0 2px hsl(var(--ring) / 35%);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-content] {
+        min-width: 0;
+        gap: 0.125rem;
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-title] {
+        color: var(--docs-toast-fg);
+        font-size: inherit;
+        font-weight: 500;
+        line-height: 1.4;
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-description] {
+        color: var(--docs-toast-muted-fg);
+        font-size: 0.8125rem;
+        line-height: 1.45;
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-icon] {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 1rem;
+        height: 1rem;
+        margin: 0;
+        color: var(--docs-toast-info);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-icon] svg {
+        width: 1rem;
+        height: 1rem;
+        margin: 0;
+        color: currentColor;
+    }
+
+    .docs-toaster [data-sonner-toast][data-type="success"] [data-icon] {
+        color: var(--docs-toast-success);
+    }
+
+    .docs-toaster [data-sonner-toast][data-type="warning"] [data-icon] {
+        color: var(--docs-toast-warning);
+    }
+
+    .docs-toaster [data-sonner-toast][data-type="error"] [data-icon] {
+        color: var(--docs-toast-error);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-button] {
+        height: 1.75rem;
+        border: 1px solid transparent;
+        border-radius: calc(var(--docs-toast-radius) - 0.125rem);
+        padding-inline: 0.625rem;
+        font-size: 0.75rem;
+        line-height: 1;
+        transition:
+            background-color 120ms ease,
+            border-color 120ms ease,
+            color 120ms ease,
+            opacity 120ms ease;
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-button][data-action] {
+        background: var(--docs-toast-action-bg);
+        color: var(--docs-toast-action-fg);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-button][data-cancel] {
+        border-color: var(--docs-toast-border);
+        background: var(--docs-toast-cancel-bg);
+        color: var(--docs-toast-cancel-fg);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-button]:hover {
+        opacity: 0.9;
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-button]:focus-visible {
+        box-shadow: 0 0 0 2px hsl(var(--ring) / 35%);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"] [data-close-button] {
+        width: 1.25rem;
+        height: 1.25rem;
+        border-color: var(--docs-toast-border);
+        background: var(--docs-toast-close-bg);
+        color: var(--docs-toast-close-fg);
+    }
+
+    .docs-toaster [data-sonner-toast][data-styled="true"]:hover [data-close-button]:hover {
+        border-color: var(--normal-border-hover);
+        background: var(--docs-toast-close-hover-bg);
+        color: var(--docs-toast-close-hover-fg);
+    }
+
     .docs-prose {
         @apply prose prose-neutral max-w-none dark:prose-invert prose-headings:scroll-m-20 prose-headings:font-semibold prose-headings:tracking-normal prose-a:font-medium prose-a:text-primary prose-code:rounded prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:font-mono prose-code:font-medium prose-code:before:content-none prose-code:after:content-none prose-pre:overflow-x-auto prose-pre:rounded-md prose-pre:border prose-pre:bg-card prose-pre:p-4 prose-pre:text-card-foreground;
         --docs-article-body-font-size: calc(1rem * var(--docs-article-font-scale, 1));
@@ -456,6 +610,24 @@
         font-size: var(--docs-article-small-font-size);
     }
 
+    .docs-prose .preview-callout {
+        @apply my-6 rounded-md border bg-muted/40 p-4 text-foreground;
+        font-size: var(--docs-article-small-font-size);
+        line-height: 1.6;
+    }
+
+    .docs-prose .preview-callout > :first-child {
+        @apply mt-0;
+    }
+
+    .docs-prose .preview-callout > :last-child {
+        @apply mb-0;
+    }
+
+    .docs-prose .preview-callout p {
+        @apply my-2 text-muted-foreground;
+    }
+
     .docs-accordion-content {
         @apply text-foreground;
         font-size: inherit;
@@ -603,7 +775,7 @@
     }
 
     .docs-markdown-editor {
-        @apply relative overflow-hidden bg-background;
+        @apply relative overflow-hidden bg-background text-foreground;
         --docs-editor-font:
             ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
             "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", Meiryo, monospace;
@@ -614,52 +786,10 @@
         tab-size: 4;
     }
 
-    .docs-markdown-editor-highlight {
-        @apply pointer-events-none absolute inset-0 m-0 overflow-hidden border-0 bg-transparent p-4 font-normal leading-6;
-        font-family: var(--docs-editor-font);
-        font-size: var(--docs-editor-font-size, 14px);
-        font-feature-settings:
-            "liga" 0,
-            "calt" 0;
-        font-variant-ligatures: none;
-        font-kerning: none;
-        font-synthesis: none;
-        letter-spacing: 0;
-        line-height: var(--docs-editor-line-height);
-        white-space: pre;
-    }
-
-    .docs-markdown-editor-highlight code {
-        @apply block bg-transparent p-0 font-normal leading-6;
-        font-family: var(--docs-editor-font);
-        font-feature-settings: inherit !important;
-        font-variant-ligatures: inherit !important;
-        font-kerning: inherit !important;
-        font-synthesis: inherit !important;
-        font-size: inherit;
-        letter-spacing: inherit !important;
-        line-height: inherit;
-        min-width: 100%;
-        transform-origin: top left;
-        white-space: pre;
-    }
-
-    .docs-markdown-editor-highlight span {
-        font-family: inherit !important;
-        font-feature-settings: inherit !important;
-        font-variant-ligatures: inherit !important;
-        font-kerning: inherit !important;
-        font-synthesis: inherit !important;
-        font-size: inherit !important;
-        font-style: normal !important;
-        font-weight: 400 !important;
-        letter-spacing: inherit !important;
-        line-height: inherit !important;
-    }
-
     .docs-markdown-editor-input {
-        @apply absolute inset-0 z-10 h-full w-full resize-none overflow-auto border-0 bg-transparent p-4 font-normal leading-6 text-transparent outline-none focus-visible:ring-0;
+        @apply absolute inset-0 z-10 h-full w-full resize-none overflow-auto border-0 bg-transparent p-4 font-normal leading-6 outline-none focus-visible:ring-0;
         caret-color: hsl(var(--foreground));
+        color: inherit;
         font-family: var(--docs-editor-font);
         font-size: var(--docs-editor-font-size, 14px);
         font-feature-settings:
@@ -674,8 +804,6 @@
         white-space: pre;
     }
 
-    .docs-markdown-editor--wrap .docs-markdown-editor-highlight,
-    .docs-markdown-editor--wrap .docs-markdown-editor-highlight code,
     .docs-markdown-editor--wrap .docs-markdown-editor-input {
         overflow-wrap: anywhere;
         white-space: pre-wrap;
@@ -683,7 +811,7 @@
 
     .docs-markdown-editor-input::selection {
         background-color: hsl(var(--primary) / 22%);
-        color: transparent;
+        color: inherit;
     }
 
     .docs-prose .beautiful-mermaid,
@@ -719,6 +847,14 @@
 
     .docs-prose :where(ul, ol).docs-task-list {
         @apply list-none pl-0;
+        --docs-task-checkbox-size: 1rem;
+        --docs-task-checkbox-radius: 0.25rem;
+        --docs-task-item-gap: 0.625rem;
+        --docs-task-checkbox-bg: hsl(var(--background));
+        --docs-task-checkbox-border: hsl(var(--border));
+        --docs-task-checkbox-checked-bg: hsl(var(--primary));
+        --docs-task-checkbox-checked-border: hsl(var(--primary));
+        --docs-task-checkbox-check: hsl(var(--primary-foreground));
     }
 
     .docs-prose :where(ul, ol).docs-task-list > li {
@@ -737,7 +873,8 @@
     }
 
     .docs-prose .docs-task-item {
-        @apply list-none;
+        @apply list-none pl-0;
+        display: block;
     }
 
     .docs-prose .docs-task-item::marker {
@@ -746,10 +883,64 @@
 
     .docs-prose .docs-task-item > p {
         @apply my-0;
+        column-gap: var(--docs-task-item-gap);
+        display: grid;
+        grid-template-columns: var(--docs-task-checkbox-size) minmax(0, 1fr);
+        min-height: 1.5em;
+        align-items: center;
+    }
+
+    .docs-prose .docs-task-item > :not(p:first-child) {
+        margin-left: calc(var(--docs-task-checkbox-size) + var(--docs-task-item-gap));
     }
 
     .docs-prose .docs-task-checkbox {
-        @apply relative top-[0.15em] mr-2 h-4 w-4 shrink-0 accent-primary;
+        @apply relative inline-grid shrink-0 place-content-center rounded border align-middle;
+        -webkit-appearance: none;
+        appearance: none;
+        align-self: center;
+        background-color: var(--docs-task-checkbox-bg);
+        background-image: none;
+        border-color: var(--docs-task-checkbox-border);
+        border-radius: var(--docs-task-checkbox-radius);
+        box-sizing: border-box;
+        grid-column: 1;
+        height: var(--docs-task-checkbox-size);
+        justify-self: center;
+        margin: 0 !important;
+        opacity: 1;
+        padding: 0;
+        top: auto !important;
+        vertical-align: middle;
+        width: var(--docs-task-checkbox-size);
+    }
+
+    .docs-prose .docs-task-checkbox:disabled {
+        cursor: default;
+        opacity: 1;
+    }
+
+    .docs-prose .docs-task-checkbox:checked {
+        background-color: var(--docs-task-checkbox-checked-bg);
+        background-image: none;
+        border-color: var(--docs-task-checkbox-checked-border);
+    }
+
+    .docs-prose .docs-task-checkbox::before {
+        border-color: var(--docs-task-checkbox-check);
+        border-style: solid;
+        border-width: 0 0.125rem 0.125rem 0;
+        content: "";
+        height: 0.625rem;
+        margin-top: -0.125rem;
+        transform: rotate(45deg) scale(0);
+        transform-origin: center;
+        transition: transform 120ms cubic-bezier(0.25, 1, 0.5, 1);
+        width: 0.35rem;
+    }
+
+    .docs-prose .docs-task-checkbox:checked::before {
+        transform: rotate(45deg) scale(1);
     }
 
     .docs-prose .docs-mermaid-zoomable {

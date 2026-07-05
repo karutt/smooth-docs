@@ -864,3 +864,114 @@ html body .docs-accordion-content li {
     font-size: inherit;
     line-height: 1.65;
 }
+
+/* Sonner toast layout */
+html body .docs-toaster[data-sonner-toaster][data-sonner-theme] {
+    --docs-toast-bg: var(--dracula-bg-secondary);
+    --docs-toast-fg: var(--dracula-body);
+    --docs-toast-muted-fg: var(--dracula-caption);
+    --docs-toast-border: var(--dracula-bg-tertiary);
+    --docs-toast-action-bg: var(--dracula-color);
+    --docs-toast-action-fg: var(--dracula-bg-secondary);
+    --docs-toast-cancel-bg: var(--dracula-bg-primary);
+    --docs-toast-cancel-fg: var(--dracula-body);
+    --docs-toast-close-bg: var(--dracula-bg-secondary);
+    --docs-toast-close-fg: var(--dracula-caption);
+    --docs-toast-close-hover-bg: color-mix(in srgb, var(--dracula-color) 12%, var(--dracula-bg-secondary));
+    --docs-toast-close-hover-fg: var(--dracula-display);
+    --docs-toast-success: var(--dracula-green);
+    --docs-toast-info: var(--dracula-cyan);
+    --docs-toast-warning: var(--dracula-yellow);
+    --docs-toast-error: var(--dracula-red);
+    --docs-toast-radius: var(--dracula-radius-sm);
+    --docs-toast-shadow: none;
+}
+
+/* Task list layout */
+html body .docs-prose :where(ul, ol).docs-task-list {
+    --docs-task-checkbox-bg: var(--dracula-bg-secondary);
+    --docs-task-checkbox-border: var(--dracula-bg-tertiary);
+    --docs-task-checkbox-checked-bg: var(--dracula-green);
+    --docs-task-checkbox-checked-border: var(--dracula-green);
+    --docs-task-checkbox-check: #0e0d11;
+    --docs-task-checkbox-radius: 0.25rem;
+    --docs-task-checkbox-size: 1rem;
+    --docs-task-item-gap: 0.625rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding-left: 0;
+    list-style: none;
+}
+
+html body .docs-prose :where(ul, ol).docs-task-list > li {
+    margin-block: 0;
+}
+
+html body .docs-prose .docs-task-item {
+    display: block;
+    padding-left: 0;
+    list-style: none;
+}
+
+html body .docs-prose .docs-task-item::marker {
+    content: "";
+}
+
+html body .docs-prose .docs-task-item > p {
+    display: grid;
+    grid-template-columns: var(--docs-task-checkbox-size) minmax(0, 1fr);
+    align-items: center;
+    column-gap: var(--docs-task-item-gap);
+    min-height: 1.5em;
+    margin: 0;
+}
+
+html body .docs-prose .docs-task-item > :not(p:first-child) {
+    margin-left: calc(var(--docs-task-checkbox-size) + var(--docs-task-item-gap));
+}
+
+html body .docs-prose .docs-task-checkbox {
+    position: relative;
+    top: auto !important;
+    display: grid !important;
+    grid-column: 1;
+    align-self: center;
+    justify-self: center;
+    width: var(--docs-task-checkbox-size);
+    height: var(--docs-task-checkbox-size);
+    margin: 0 !important;
+    padding: 0;
+    border: 1px solid var(--docs-task-checkbox-border);
+    border-radius: var(--docs-task-checkbox-radius);
+    background-color: var(--docs-task-checkbox-bg) !important;
+    background-image: none !important;
+    box-sizing: border-box;
+    -webkit-appearance: none;
+    appearance: none;
+    opacity: 1;
+    vertical-align: middle !important;
+}
+
+html body .docs-prose .docs-task-checkbox:checked {
+    border-color: var(--docs-task-checkbox-checked-border);
+    background-color: var(--docs-task-checkbox-checked-bg) !important;
+    background-image: none !important;
+}
+
+html body .docs-prose .docs-task-checkbox::before {
+    width: 0.35rem;
+    height: 0.625rem;
+    margin-top: -0.125rem;
+    border-color: var(--docs-task-checkbox-check);
+    border-style: solid;
+    border-width: 0 0.125rem 0.125rem 0;
+    content: "";
+    transform: rotate(45deg) scale(0);
+    transform-origin: center;
+    transition: transform 120ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+html body .docs-prose .docs-task-checkbox:checked::before {
+    transform: rotate(45deg) scale(1);
+}
