@@ -33,4 +33,10 @@ export function listThemes(kitRoot: string): Array<{
   root: string;
   title: string;
   extends?: string;
+  sourceDir: string;
+  cssFile: string | null;
+  jsFile: string | null;
+  publicDir: string | null;
 }>;
+
+export function updateSmoothDocsTheme(projectDir: string, themeName: string): string;

@@ -26,6 +26,7 @@ const publicDir = path.join(generatedDir, "public");
 const siteTitle = config.siteName;
 const AUTONUMBER_PREFIX = "__beautiful_mermaid_autonumber_";
 const AUTONUMBER_PATTERN = /__beautiful_mermaid_autonumber_(\d+)__\s*/g;
+const TASK_LIST_MARKER = /^\s*\[([ xX])\]\s+/;
 
 await fs.mkdir(sourceDir, { recursive: true });
 await fs.rm(generatedDir, { recursive: true, force: true });
@@ -37,6 +38,15 @@ const markdownFiles = await fg("**/*.md", {
   dot: false,
   onlyFiles: true,
 });
+
+const directoryPaths = await fg("**", {
+  cwd: sourceDir,
+  dot: false,
+  onlyDirectories: true,
+});
+const directoryRouteSet = new Set(
+  directoryPaths.map((directory) => directory.split(path.sep).join("/").replace(/\/+$/, "")),
+);
 
 const assetFiles = await fg("**/*", {
   cwd: sourceDir,
@@ -58,12 +68,14 @@ await Promise.all(
 const pages = [];
 for (const relativePath of markdownFiles.sort()) {
   const absolutePath = path.join(sourceDir, relativePath);
+  const stats = await fs.stat(absolutePath);
   const raw = await fs.readFile(absolutePath, "utf8");
   const parsed = matter(raw);
   const route = toRoute(relativePath);
   const pageDir = path.posix.dirname(relativePath) === "." ? "" : path.posix.dirname(relativePath);
-  const title = parsed.data.title || firstHeading(parsed.content) || titleFromPath(relativePath);
-  const markdown = parsed.content.trim();
+  const titleHeading = extractTitleHeading(parsed.content);
+  const title = titleHeading?.title || parsed.data.title || titleFromPath(relativePath);
+  const markdown = (titleHeading?.markdownWithoutHeading ?? parsed.content).trim();
   const html = renderMarkdown(markdown, { pageDir });
 
   pages.push({
@@ -74,6 +86,9 @@ for (const relativePath of markdownFiles.sort()) {
     markdown: raw,
     html,
     text: plainText(markdown),
+    createdAt: toFileDate(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs),
+    updatedAt: toFileDate(stats.mtimeMs),
+    kind: "page",
     order: getOrder(relativePath, parsed.data),
     relativePath,
   });
@@ -89,11 +104,14 @@ if (pages.length === 0) {
     markdown,
     html: renderMarkdown(markdown, { pageDir: "" }),
     text: plainText(markdown),
+    kind: "page",
     order: 0,
     relativePath: "index.md",
   });
 }
 
+addInboxPages(pages);
+await addFolderPages(pages, directoryPaths);
 pages.sort(comparePages);
 
 const docsData = {
@@ -104,7 +122,7 @@ const docsData = {
     [site]: config.devPort,
   },
   pages: pages.map(({ order, relativePath, ...page }) => page),
-  nav: buildNav(pages),
+  nav: buildNav(pages, directoryPaths),
 };
 
 const output = `import type { DocsData } from "../../src/types";\n\nexport const docsData: DocsData = ${JSON.stringify(
@@ -275,6 +293,7 @@ function renderMarkdown(markdown, env) {
   md.renderer.rules.math_block = (tokens, index) => `${renderMathBlock(tokens[index].content)}\n`;
   md.inline.ruler.after("escape", "math_inline", mathInlineRule);
   md.renderer.rules.math_inline = (tokens, index) => renderMathInline(tokens[index].content);
+  md.core.ruler.after("inline", "task_lists", taskListRule);
 
   const defaultImage =
     md.renderer.rules.image ||
@@ -841,55 +860,378 @@ function normalizeKatexCompatibleSource(source) {
     .replace(/\\end\{eqnarray\*?\}/g, "\\end{aligned}");
 }
 
-function buildNav(pageList) {
+// GitHub-flavored task lists: turn "- [ ] item" / "- [x] item" into rendered
+// checkboxes. markdown-it does not recognize these out of the box, so we
+// post-process the token stream (mirroring markdown-it-task-lists).
+function taskListRule(state) {
+  const tokens = state.tokens;
+
+  for (let index = 2; index < tokens.length; index += 1) {
+    if (!isTaskListItem(tokens, index)) continue;
+
+    todoifyInlineToken(tokens[index], state.Token);
+    tokens[index - 2].attrJoin("class", "docs-task-item");
+  }
+
+  splitMixedTaskListsOnBlankLines(state);
+  markPureTaskLists(tokens);
+}
+
+function splitMixedTaskListsOnBlankLines(state) {
+  const { tokens } = state;
+  const lines = state.src.split(/\r?\n/);
+  const insertions = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (!isListOpen(tokens[index])) continue;
+
+    const itemOpenIndices = directListItemOpenIndices(tokens, index);
+    for (let itemIndex = 1; itemIndex < itemOpenIndices.length; itemIndex += 1) {
+      const previousItemIndex = itemOpenIndices[itemIndex - 1];
+      const currentItemIndex = itemOpenIndices[itemIndex];
+      const previousIsTask = tokenHasClass(tokens[previousItemIndex], "docs-task-item");
+      const currentIsTask = tokenHasClass(tokens[currentItemIndex], "docs-task-item");
+
+      if (previousIsTask === currentIsTask) continue;
+      if (!hasBlankLineBeforeItem(lines, tokens[currentItemIndex])) continue;
+
+      insertions.push({
+        index: currentItemIndex,
+        closeToken: createListCloseToken(tokens[index], state.Token),
+        openToken: cloneToken(tokens[index], state.Token),
+      });
+    }
+  }
+
+  for (const insertion of insertions.sort((a, b) => b.index - a.index)) {
+    tokens.splice(insertion.index, 0, insertion.closeToken, insertion.openToken);
+  }
+}
+
+function markPureTaskLists(tokens) {
+  for (let index = 0; index < tokens.length; index += 1) {
+    if (!isListOpen(tokens[index])) continue;
+
+    if (allDirectListItemsAreTaskItems(tokens, index)) {
+      addClassIfMissing(tokens[index], "docs-task-list");
+    }
+  }
+}
+
+function isListOpen(token) {
+  return token?.type === "bullet_list_open" || token?.type === "ordered_list_open";
+}
+
+function hasBlankLineBeforeItem(lines, itemOpenToken) {
+  const startLine = itemOpenToken.map?.[0];
+  return Number.isInteger(startLine) && startLine > 0 && lines[startLine - 1]?.trim() === "";
+}
+
+function createListCloseToken(listOpenToken, TokenClass) {
+  const type =
+    listOpenToken.type === "ordered_list_open" ? "ordered_list_close" : "bullet_list_close";
+  const token = new TokenClass(type, listOpenToken.tag, -1);
+  token.level = listOpenToken.level;
+  token.block = true;
+  return token;
+}
+
+function cloneToken(token, TokenClass) {
+  const next = new TokenClass(token.type, token.tag, token.nesting);
+  next.attrs = token.attrs ? token.attrs.map(([name, value]) => [name, value]) : null;
+  next.map = token.map ? [...token.map] : null;
+  next.level = token.level;
+  next.children = token.children ? [...token.children] : null;
+  next.content = token.content;
+  next.markup = token.markup;
+  next.info = token.info;
+  next.meta = token.meta ? { ...token.meta } : null;
+  next.block = token.block;
+  next.hidden = token.hidden;
+  return next;
+}
+
+function allDirectListItemsAreTaskItems(tokens, listOpenIndex) {
+  const itemOpenIndices = directListItemOpenIndices(tokens, listOpenIndex);
+  return (
+    itemOpenIndices.length > 0 &&
+    itemOpenIndices.every((index) => tokenHasClass(tokens[index], "docs-task-item"))
+  );
+}
+
+function directListItemOpenIndices(tokens, listOpenIndex) {
+  const listLevel = tokens[listOpenIndex].level;
+  const itemLevel = listLevel + 1;
+  const itemOpenIndices = [];
+
+  for (let index = listOpenIndex + 1; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (
+      token.level === listLevel &&
+      (token.type === "bullet_list_close" || token.type === "ordered_list_close")
+    ) {
+      break;
+    }
+
+    if (token.type === "list_item_open" && token.level === itemLevel) {
+      itemOpenIndices.push(index);
+    }
+  }
+
+  return itemOpenIndices;
+}
+
+function tokenHasClass(token, className) {
+  const classValue = token.attrGet("class") ?? "";
+  return classValue.split(/\s+/).includes(className);
+}
+
+function addClassIfMissing(token, className) {
+  if (!tokenHasClass(token, className)) {
+    token.attrJoin("class", className);
+  }
+}
+
+function isTaskListItem(tokens, index) {
+  return (
+    tokens[index].type === "inline" &&
+    tokens[index - 1].type === "paragraph_open" &&
+    tokens[index - 2].type === "list_item_open" &&
+    TASK_LIST_MARKER.test(tokens[index].content)
+  );
+}
+
+function todoifyInlineToken(token, TokenClass) {
+  const checked = /^\s*\[[xX]\]/.test(token.content);
+  token.content = token.content.replace(TASK_LIST_MARKER, "");
+
+  const firstText = token.children?.find((child) => child.type === "text");
+  if (firstText) firstText.content = firstText.content.replace(TASK_LIST_MARKER, "");
+
+  const checkbox = new TokenClass("html_inline", "", 0);
+  checkbox.content = `<input class="docs-task-checkbox" type="checkbox" disabled${
+    checked ? " checked" : ""
+  }> `;
+  token.children = [checkbox, ...(token.children ?? [])];
+}
+
+function buildNav(pageList, directoryList) {
   const root = [];
   const byKey = new Map();
 
-  for (const page of pageList) {
-    const segments = page.relativePath.split("/");
-    const isIndex = segments[segments.length - 1] === "index.md";
-    const dirs = isIndex ? segments.slice(0, -1) : segments.slice(0, -1);
-    let current = root;
-    let key = "";
+  const ensureFolder = (folderPath) => {
+    if (!folderPath) return null;
+    if (byKey.has(folderPath)) return byKey.get(folderPath);
 
-    for (const dir of dirs) {
-      key = key ? `${key}/${dir}` : dir;
-      if (!byKey.has(key)) {
-        const node = {
-          title: titleFromSegment(dir),
-          url: toRoute(`${key}/index.md`),
-          order: orderFromSegment(dir),
-          children: [],
-        };
-        byKey.set(key, node);
-        current.push(node);
-      }
-      const node = byKey.get(key);
-      current = node.children;
+    const parentPath = path.posix.dirname(folderPath);
+    const parent = parentPath === "." ? null : ensureFolder(parentPath);
+    const children = parent ? parent.children : root;
+    const node = {
+      title: titleFromSegment(path.posix.basename(folderPath)),
+      url: toFolderRoute(folderPath),
+      order: orderFromSegment(path.posix.basename(folderPath)),
+      kind: "folder",
+      relativePath: folderPath,
+      system: folderPath === "inbox" ? "inbox" : undefined,
+      children: [],
+    };
+    byKey.set(folderPath, node);
+    children.push(node);
+    return node;
+  };
+
+  for (const directory of directoryList.sort()) {
+    ensureFolder(directory);
+  }
+
+  for (const page of pageList) {
+    if (page.kind === "folder") {
+      ensureFolder(page.relativePath);
+      continue;
     }
 
-    if (isIndex && dirs.length > 0) {
-      const node = byKey.get(dirs.join("/"));
+    if (page.kind === "inbox") {
+      const node = ensureFolder(page.inbox?.root ?? "inbox");
       node.title = page.title;
       node.url = page.url;
       node.order = page.order;
-    } else {
-      current.push({
-        title: page.title,
-        url: page.url,
-        order: page.order,
-        children: [],
-      });
+      node.system = "inbox";
+      continue;
     }
+
+    const parentPath = path.posix.dirname(page.relativePath);
+    const parent = parentPath === "." ? null : ensureFolder(parentPath);
+    const current = parent ? parent.children : root;
+    current.push({
+      title: page.title,
+      url: page.url,
+      order: page.order,
+      kind: "page",
+      sourcePath: page.sourcePath,
+      relativePath: page.relativePath,
+      children: [],
+    });
   }
 
   sortNav(root);
   return root;
 }
 
+function addInboxPages(pageList) {
+  const inboxItems = pageList
+    .filter(
+      (page) =>
+        page.kind === "page" &&
+        page.relativePath.startsWith("inbox/") &&
+        page.relativePath !== "inbox/index.md",
+    )
+    .sort(compareInboxItems);
+
+  if (inboxItems.length === 0) return;
+
+  const existingIndex = pageList.find((page) => page.relativePath === "inbox/index.md");
+  const inboxPage = {
+    title: "Inbox",
+    url: "/inbox/",
+    sourcePath: `${site}/docs/inbox/`,
+    absolutePath: path.join(sourceDir, "inbox"),
+    markdown: "# Inbox\n\nRecent inbox documents.",
+    html: renderInboxFallbackHtml(inboxItems),
+    text: `${inboxItems.length} inbox documents`,
+    createdAt: inboxItems[0]?.createdAt,
+    updatedAt: inboxItems[0]?.updatedAt,
+    kind: "inbox",
+    inbox: {
+      root: "inbox",
+      items: inboxItems.map((page) => ({
+        title: page.title,
+        url: page.url,
+        sourcePath: page.sourcePath,
+        absolutePath: page.absolutePath,
+        text: page.text,
+        createdAt: page.createdAt,
+        updatedAt: page.updatedAt,
+      })),
+    },
+    order: existingIndex?.order ?? orderFromSegment("inbox"),
+    relativePath: "inbox/index.md",
+  };
+
+  if (existingIndex) {
+    Object.assign(existingIndex, inboxPage);
+    return;
+  }
+
+  pageList.push(inboxPage);
+}
+
+async function addFolderPages(pageList, directoryList) {
+  const sourcePages = pageList.filter((page) => page.kind === "page");
+  const sortedDirectories = [...directoryList].sort((a, b) => a.localeCompare(b, "ja"));
+  const hasInboxPage = pageList.some(
+    (page) => page.kind === "inbox" && page.relativePath === "inbox/index.md",
+  );
+
+  for (const folderPath of sortedDirectories) {
+    if (folderPath === "inbox" && hasInboxPage) continue;
+
+    const absolutePath = path.join(sourceDir, folderPath);
+    const stats = await fs.stat(absolutePath);
+    const directFolders = sortedDirectories
+      .filter((directory) => path.posix.dirname(directory) === folderPath)
+      .map((directory) => {
+        const folderAbsolutePath = path.join(sourceDir, directory);
+        return {
+          kind: "folder",
+          title: titleFromSegment(path.posix.basename(directory)),
+          url: toFolderRoute(directory),
+          folderPath: `${site}/docs/${directory}`,
+          absolutePath: folderAbsolutePath,
+          text: "Folder",
+        };
+      });
+    const directPages = sourcePages
+      .filter((page) => path.posix.dirname(page.relativePath) === folderPath)
+      .map((page) => ({
+        kind: "page",
+        title: page.title,
+        url: page.url,
+        sourcePath: page.sourcePath,
+        absolutePath: page.absolutePath,
+        text: page.text,
+        createdAt: page.createdAt,
+        updatedAt: page.updatedAt,
+      }));
+    const items = [...directFolders, ...directPages].sort(compareFolderItems);
+
+    pageList.push({
+      title: titleFromSegment(path.posix.basename(folderPath)),
+      url: toFolderRoute(folderPath),
+      sourcePath: `${site}/docs/${folderPath}/`,
+      absolutePath,
+      markdown: "",
+      html: renderFolderFallbackHtml(folderPath, items),
+      text: `${items.length} items`,
+      createdAt: toFileDate(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs),
+      updatedAt: toFileDate(stats.mtimeMs),
+      kind: "folder",
+      folder: {
+        root: folderPath,
+        items,
+      },
+      order: orderFromSegment(path.posix.basename(folderPath)),
+      relativePath: folderPath,
+    });
+  }
+}
+
+function compareFolderItems(a, b) {
+  const rank = (item) => (item.kind === "folder" ? 0 : 1);
+  return rank(a) - rank(b) || a.title.localeCompare(b.title, "ja");
+}
+
+function renderFolderFallbackHtml(folderPath, items) {
+  const rows = items
+    .map((item) => `<li><a href="${escapeAttribute(item.url)}">${escapeHtml(item.title)}</a></li>`)
+    .join("");
+
+  return `<p>${escapeHtml(folderPath)} contains ${items.length} items.</p><ul>${rows}</ul>`;
+}
+
+function compareInboxItems(a, b) {
+  const aTime = Date.parse(a.createdAt ?? a.updatedAt ?? "") || 0;
+  const bTime = Date.parse(b.createdAt ?? b.updatedAt ?? "") || 0;
+  return bTime - aTime || a.title.localeCompare(b.title, "ja");
+}
+
+function renderInboxFallbackHtml(inboxItems) {
+  const rows = inboxItems
+    .map(
+      (page) =>
+        `<li><a href="${escapeAttribute(page.url)}">${escapeHtml(page.title)}</a></li>`,
+    )
+    .join("");
+
+  return `<p>Recent inbox documents.</p><ul>${rows}</ul>`;
+}
+
+function toFileDate(value) {
+  return Number.isFinite(value) && value > 0 ? new Date(value).toISOString() : undefined;
+}
+
 function sortNav(items) {
-  items.sort((a, b) => a.order - b.order || a.title.localeCompare(b.title, "ja"));
+  items.sort(
+    (a, b) =>
+      navItemRank(a) - navItemRank(b) ||
+      a.order - b.order ||
+      a.title.localeCompare(b.title, "ja"),
+  );
   items.forEach((item) => sortNav(item.children));
+}
+
+function navItemRank(item) {
+  if (item.system === "inbox") return 0;
+  return item.kind === "folder" || item.children.length > 0 ? 1 : 2;
 }
 
 function comparePages(a, b) {
@@ -922,10 +1264,13 @@ function orderFromSegment(segment) {
 function toRoute(relativePath) {
   const normalized = relativePath.split(path.sep).join("/");
   if (normalized === "index.md") return "/";
-  if (normalized.endsWith("/index.md")) {
-    return `/${normalized.slice(0, -"index.md".length)}`;
-  }
-  return `/${normalized.replace(/\.md$/, "")}/`;
+  const routePath = normalized.replace(/\.md$/, "");
+  return directoryRouteSet.has(routePath) ? `/${normalized}/` : `/${routePath}/`;
+}
+
+function toFolderRoute(relativePath) {
+  const normalized = relativePath.split(path.sep).join("/").replace(/\/+$/, "");
+  return normalized ? `/${normalized}/` : "/";
 }
 
 function titleFromPath(relativePath) {
@@ -942,9 +1287,38 @@ function titleFromSegment(segment) {
     .replace(/\b\w/g, (char) => char.toUpperCase());
 }
 
-function firstHeading(markdown) {
-  const match = markdown.match(/^#\s+(.+)$/m);
-  return match?.[1]?.trim();
+function extractTitleHeading(markdown) {
+  const lines = markdown.split(/\r?\n/);
+  let inFence = false;
+  let fenceMarker = "";
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fenceMatch) {
+      const marker = fenceMatch[1];
+      if (!inFence) {
+        inFence = true;
+        fenceMarker = marker[0];
+      } else if (marker[0] === fenceMarker) {
+        inFence = false;
+        fenceMarker = "";
+      }
+      continue;
+    }
+
+    if (inFence) continue;
+
+    const headingMatch = line.match(/^ {0,3}#\s+(.+?)\s*$/);
+    if (!headingMatch) continue;
+
+    return {
+      title: headingMatch[1].replace(/\s+#+\s*$/, "").trim(),
+      markdownWithoutHeading: [...lines.slice(0, index), ...lines.slice(index + 1)].join("\n"),
+    };
+  }
+
+  return null;
 }
 
 function plainText(markdown) {
@@ -1034,6 +1408,10 @@ function escapeHtml(value) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function escapeAttribute(value) {
+  return escapeHtml(value).replace(/'/g, "&#39;");
 }
 
 function escapeAttr(value) {

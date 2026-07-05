@@ -57,14 +57,47 @@ export function listThemes(kitRoot) {
     .map((entry) => {
       const themeRoot = path.join(themesDir, entry.name);
       const metadata = readThemeMetadata(themeRoot);
+      const resolvedTheme = resolveTheme({
+        kitRoot,
+        projectDir: kitRoot,
+        themeConfig: { name: entry.name },
+      });
       return {
         name: entry.name,
         root: themeRoot,
         title: metadata.title ?? titleCase(entry.name),
         extends: metadata.extends,
+        sourceDir: resolvedTheme.sourceDir,
+        cssFile: resolvedTheme.cssFile,
+        jsFile: resolvedTheme.jsFile,
+        publicDir: resolvedTheme.publicDir,
       };
     })
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function updateSmoothDocsTheme(projectDir, themeName) {
+  const configPath = findConfigPath(projectDir);
+
+  if (!configPath) {
+    const targetPath = path.join(projectDir, "smooth-docs.yml");
+    fs.writeFileSync(targetPath, `theme: ${JSON.stringify(String(themeName))}\n`, "utf8");
+    return targetPath;
+  }
+
+  if (configPath.endsWith(".json")) {
+    const config = readConfigFile(configPath);
+    config.theme = String(themeName);
+    fs.writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    return configPath;
+  }
+
+  const source = fs.readFileSync(configPath, "utf8");
+  const document = YAML.parseDocument(source);
+  document.set("theme", String(themeName));
+  fs.writeFileSync(configPath, String(document), "utf8");
+
+  return configPath;
 }
 
 function readConfigFile(configPath) {
