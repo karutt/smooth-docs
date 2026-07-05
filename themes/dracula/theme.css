@@ -1,0 +1,866 @@
+@font-face {
+    font-family: "DM Sans";
+    font-display: swap;
+    font-style: normal;
+    font-weight: 400 700;
+    src: url("https://draculatheme.com/_next/static/media/5c285b27cdda1fe8.p.2_mbdogr7ni8i.woff2")
+        format("woff2");
+}
+
+@font-face {
+    font-family: "DM Mono";
+    font-display: swap;
+    font-style: normal;
+    font-weight: 400;
+    src: url("https://draculatheme.com/_next/static/media/36363bfb06833f56.38hmww4cj4vme.woff2")
+        format("woff2");
+}
+
+html:root {
+    --dracula-hue: 48;
+    --dracula-main-hue: 252;
+    --dracula-cyan: #036a96;
+    --dracula-green: #14710a;
+    --dracula-orange: #a34d14;
+    --dracula-pink: #a3144d;
+    --dracula-purple: #644ac9;
+    --dracula-red: #cb3a2a;
+    --dracula-yellow: #695811;
+    --dracula-bg-primary: hsl(48 12% 90%);
+    --dracula-bg-secondary: hsl(48 12% 96%);
+    --dracula-bg-tertiary: hsl(48 12% 72%);
+    --dracula-bg-overlay: hsl(48 12% 6% / 84%);
+    --dracula-code-bg: #fffdf5;
+    --dracula-code-fg: #1f1f1f;
+    --dracula-code-comment: #635d98;
+    --dracula-color: hsl(252 54% 24%);
+    --dracula-caption: hsl(48 12% 30%);
+    --dracula-body: hsl(48 12% 24%);
+    --dracula-heading: hsl(48 12% 18%);
+    --dracula-display: hsl(48 12% 12%);
+    --dracula-radius-sm: 6px;
+    --dracula-radius-md: 12px;
+    --dracula-radius-lg: 18px;
+    --dracula-duration: 0.15s;
+    --dracula-font-size-ui: 14px;
+    --dracula-font-size-sidebar: 13px;
+    --dracula-font-size-prose: 15px;
+    --dracula-font-size-code: 14px;
+    --dracula-font-size-code-label: 11px;
+
+    --background: 48 12% 90%;
+    --foreground: 48 12% 24%;
+    --card: 48 12% 96%;
+    --card-foreground: 48 12% 24%;
+    --popover: 48 12% 96%;
+    --popover-foreground: 48 12% 24%;
+    --primary: 252 54% 24%;
+    --primary-foreground: 48 12% 96%;
+    --secondary: 48 12% 96%;
+    --secondary-foreground: 48 12% 18%;
+    --muted: 48 12% 84%;
+    --muted-foreground: 48 12% 30%;
+    --accent: 48 12% 84%;
+    --accent-foreground: 48 12% 18%;
+    --destructive: 5 64% 48%;
+    --destructive-foreground: 48 12% 96%;
+    --border: 48 12% 72%;
+    --input: 48 12% 72%;
+    --ring: 252 54% 24%;
+    --radius: 0.375rem;
+    --sidebar-background: 48 12% 90%;
+    --sidebar-foreground: 48 12% 30%;
+    --sidebar-primary: 252 54% 24%;
+    --sidebar-primary-foreground: 48 12% 96%;
+    --sidebar-accent: 48 12% 96%;
+    --sidebar-accent-foreground: 48 12% 12%;
+    --sidebar-border: 48 12% 72%;
+    --sidebar-ring: 252 54% 24%;
+    --docs-mermaid-background: 48 12% 96%;
+}
+
+html.dark {
+    --dracula-hue: 231;
+    --dracula-main-hue: 265;
+    --dracula-cyan: #8be9fd;
+    --dracula-green: #50fa7b;
+    --dracula-orange: #ffb86c;
+    --dracula-pink: #ff79c6;
+    --dracula-purple: #bd93f9;
+    --dracula-red: #ff5555;
+    --dracula-yellow: #f1fa8c;
+    --dracula-bg-primary: #282a36;
+    --dracula-bg-secondary: #21222c;
+    --dracula-bg-tertiary: #44475a;
+    --dracula-bg-overlay: rgb(25 26 33 / 88%);
+    --dracula-selection: #44475a;
+    --dracula-code-bg: #21222c;
+    --dracula-code-fg: #f8f8f2;
+    --dracula-code-comment: #6272a4;
+    --dracula-color: #8be9fd;
+    --dracula-caption: #d6dcff;
+    --dracula-body: #f8f8f2;
+    --dracula-heading: #bd93f9;
+    --dracula-display: #f8f8f2;
+
+    --background: 231.43 14.89% 18.43%;
+    --foreground: 60 30% 96.08%;
+    --card: 234.55 14.29% 15.1%;
+    --card-foreground: 60 30% 96.08%;
+    --popover: 234.55 14.29% 15.1%;
+    --popover-foreground: 60 30% 96.08%;
+    --primary: 190.53 96.61% 76.86%;
+    --primary-foreground: 231.43 14.89% 18.43%;
+    --secondary: 234.55 14.29% 15.1%;
+    --secondary-foreground: 60 30% 96.08%;
+    --muted: 231.82 13.92% 30.98%;
+    --muted-foreground: 231.22 100% 91.96%;
+    --accent: 231.82 13.92% 30.98%;
+    --accent-foreground: 60 30% 96.08%;
+    --destructive: 0 100% 67%;
+    --destructive-foreground: 60 30% 96%;
+    --border: 231.82 13.92% 30.98%;
+    --input: 231.82 13.92% 30.98%;
+    --ring: 264.71 89.47% 77.65%;
+    --sidebar-background: 231.43 14.89% 18.43%;
+    --sidebar-foreground: 231.22 100% 91.96%;
+    --sidebar-primary: 190.53 96.61% 76.86%;
+    --sidebar-primary-foreground: 231.43 14.89% 18.43%;
+    --sidebar-accent: 234.55 14.29% 15.1%;
+    --sidebar-accent-foreground: 60 30% 96.08%;
+    --sidebar-border: 231.82 13.92% 30.98%;
+    --sidebar-ring: 264.71 89.47% 77.65%;
+    --docs-mermaid-background: 234.55 14.29% 15.1%;
+}
+
+::selection {
+    background: var(--dracula-selection, var(--dracula-bg-tertiary));
+    color: var(--dracula-code-fg);
+}
+
+html {
+    background: var(--dracula-bg-primary);
+    color: var(--dracula-body);
+    font-family: "DM Sans", sans-serif, system-ui;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0;
+    text-rendering: optimizeLegibility;
+}
+
+body {
+    background: var(--dracula-bg-primary);
+    color: var(--dracula-body);
+    font-family: "DM Sans", sans-serif, system-ui;
+    font-size: var(--dracula-font-size-ui);
+    line-height: 1.5;
+    letter-spacing: 0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+body,
+button,
+input,
+select,
+textarea {
+    font-family: "DM Sans", sans-serif, system-ui;
+}
+
+pre,
+code,
+kbd,
+.docs-prose .docs-code-block-label {
+    font-family: "DM Mono", monospace, system-ui;
+    font-variant-ligatures: normal;
+}
+
+html .docs-prose,
+html .docs-accordion-content {
+    color: var(--dracula-body);
+}
+
+html .docs-prose {
+    font-size: var(--dracula-font-size-prose);
+    line-height: 1.65;
+}
+
+html .docs-page-header {
+    margin-bottom: 1.5rem;
+}
+
+html .docs-page-title {
+    color: var(--dracula-display);
+    line-height: 1.2;
+}
+
+html .docs-prose > .contents > h1 {
+    color: var(--dracula-display);
+    font-size: clamp(2.4rem, 6vw, 4.5rem);
+    font-weight: 700;
+    line-height: 1.02;
+    margin-bottom: 0.45em;
+    text-wrap: balance;
+}
+
+html .docs-prose > .contents > h2 {
+    color: var(--dracula-heading);
+    font-size: 1.45rem;
+    font-weight: 600;
+    line-height: 1.25;
+    margin-top: 2.25em;
+    padding-bottom: 0.45rem;
+    border-bottom: 1px solid var(--dracula-bg-tertiary);
+}
+
+html .docs-prose > .contents > h3 {
+    color: var(--dracula-heading);
+    font-size: 1.12rem;
+    font-weight: 600;
+    line-height: 1.35;
+    margin-top: 1.65em;
+}
+
+html .docs-prose > .contents > h4 {
+    color: var(--dracula-heading);
+    font-size: 0.96rem;
+    font-weight: 600;
+}
+
+html .docs-prose p,
+html .docs-prose ul,
+html .docs-prose ol {
+    margin-top: 0;
+    margin-bottom: 1em;
+}
+
+html .docs-prose strong,
+html .docs-prose b {
+    color: var(--dracula-orange);
+    font-weight: 500;
+}
+
+html .docs-prose em {
+    color: var(--dracula-yellow);
+}
+
+html .docs-prose a {
+    color: var(--dracula-color);
+    font-weight: 500;
+    text-decoration: underline wavy;
+    text-decoration-color: var(--dracula-color);
+    text-underline-offset: 0.1875rem;
+    transition:
+        color var(--dracula-duration) ease,
+        text-decoration-color var(--dracula-duration) ease;
+}
+
+html .docs-prose a:hover {
+    color: var(--dracula-pink);
+    text-decoration-color: var(--dracula-pink);
+}
+
+html .docs-prose hr {
+    height: 1px;
+    border: 0;
+    background: var(--dracula-bg-tertiary);
+}
+
+html .docs-left-sidebar,
+.docs-toc-panel-desktop,
+.docs-pin-panel-desktop {
+    background: var(--dracula-bg-primary);
+    color: var(--dracula-caption);
+    border-color: var(--dracula-bg-tertiary);
+    font-size: var(--dracula-font-size-sidebar);
+}
+
+html .docs-left-sidebar [data-sidebar="group-label"] {
+    color: color-mix(in srgb, var(--dracula-caption) 74%, var(--dracula-bg-primary));
+}
+
+.docs-sidebar-resizer::after {
+    background: var(--dracula-bg-tertiary);
+}
+
+html [data-sidebar="menu-button"],
+html [data-sidebar="menu-sub-button"],
+html .docs-toc-desktop a,
+html .docs-toc-panel-desktop a {
+    position: relative;
+    border-radius: var(--dracula-radius-sm);
+    color: var(--dracula-caption);
+    font-size: var(--dracula-font-size-sidebar);
+    box-shadow: none;
+    outline: 0;
+    transition:
+        background-color var(--dracula-duration) ease,
+        color var(--dracula-duration) ease,
+        box-shadow var(--dracula-duration) ease;
+}
+
+[data-sidebar="menu-button"] {
+    min-height: 2rem;
+    padding: 0.375rem 0.5rem;
+}
+
+[data-sidebar="menu-sub-button"] {
+    min-height: 1.75rem;
+}
+
+[data-sidebar="menu-button"]:hover,
+[data-sidebar="menu-sub-button"]:hover,
+.docs-toc-desktop a:hover,
+.docs-toc-panel-desktop a:hover {
+    background: var(--dracula-bg-secondary);
+    color: var(--dracula-display);
+    box-shadow: none;
+}
+
+[data-sidebar="menu-button"][data-active="true"],
+[data-sidebar="menu-sub-button"][data-active="true"] {
+    background-color: var(--dracula-bg-secondary) !important;
+    color: var(--dracula-color) !important;
+    box-shadow: none;
+    font-weight: 500;
+}
+
+[data-sidebar="menu-button"][data-active="true"] svg,
+[data-sidebar="menu-sub-button"][data-active="true"] svg {
+    color: var(--dracula-color) !important;
+}
+
+.docs-toc-desktop a[aria-current="true"],
+.docs-toc-panel-desktop a[aria-current="true"] {
+    background-color: var(--dracula-bg-tertiary) !important;
+    color: var(--dracula-display) !important;
+    box-shadow: none;
+}
+
+header,
+.docs-header,
+.docs-topbar {
+    background: var(--dracula-bg-primary);
+    border-color: var(--dracula-bg-tertiary);
+    color: var(--dracula-caption);
+}
+
+button,
+.docs-prose button,
+[role="button"] {
+    letter-spacing: 0;
+}
+
+html .docs-prose :not(pre) > code,
+html .docs-accordion-content code,
+kbd {
+    display: inline-block;
+    padding: 0 0.2em;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--dracula-green);
+    font-family: "DM Mono", monospace, system-ui;
+    font-size: 0.95em;
+    font-weight: 400;
+    word-break: break-word;
+}
+
+kbd {
+    min-width: 1.45em;
+    border: 1px solid var(--dracula-bg-primary);
+    border-radius: 3px;
+    background: var(--dracula-bg-tertiary);
+    color: var(--dracula-display);
+    text-align: center;
+}
+
+html .docs-prose blockquote {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 1em 0;
+    padding: 0.75rem 1rem;
+    border: 0;
+    border-left: 0.25em solid var(--dracula-code-comment);
+    border-radius: 0 var(--dracula-radius-sm) var(--dracula-radius-sm) 0;
+    background: var(--dracula-bg-secondary);
+    color: var(--dracula-caption);
+    font-style: normal;
+}
+
+html .docs-prose blockquote > * {
+    margin: 0;
+}
+
+html .docs-prose blockquote p {
+    color: inherit;
+}
+
+html .docs-prose .dracula-callout {
+    margin: 1em 0;
+    padding: 0.875rem 1rem;
+    border: 0;
+    border-left: 3px solid var(--dracula-cyan);
+    border-radius: 0 var(--dracula-radius-sm) var(--dracula-radius-sm) 0;
+    background: var(--dracula-bg-secondary);
+    color: var(--dracula-body);
+}
+
+html .docs-prose .dracula-callout > :first-child {
+    margin-top: 0;
+}
+
+html .docs-prose .dracula-callout > :last-child {
+    margin-bottom: 0;
+}
+
+html .docs-prose .dracula-callout strong {
+    color: var(--dracula-cyan);
+}
+
+html .docs-prose :where(ul, ol) {
+    padding-left: 1.55rem;
+}
+
+html .docs-prose li {
+    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
+    padding-left: 0.2rem;
+}
+
+html .docs-prose li::marker {
+    color: var(--dracula-caption);
+}
+
+html .docs-prose :where(ul, ol).docs-task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    margin: 0 0 1em;
+    padding-left: 0;
+    list-style: none;
+}
+
+html .docs-prose :where(ul, ol).docs-task-list > li {
+    margin-top: 0.125rem;
+    margin-bottom: 0.125rem;
+}
+
+html .docs-prose :where(ul, ol).docs-task-list > li:not(.docs-task-item) {
+    display: list-item;
+    margin-left: 1.5rem;
+    padding-left: 0.25rem;
+    list-style-type: disc;
+}
+
+html .docs-prose :where(ul, ol).docs-task-list > li > p,
+html .docs-prose .docs-task-item > p,
+html .docs-prose li > p:first-child,
+html .docs-prose li > p:last-child {
+    margin: 0;
+}
+
+html .docs-prose .docs-task-item {
+    display: flex;
+    min-height: 1.65em;
+    align-items: center;
+    gap: 0.5rem;
+    padding-left: 0;
+    list-style: none;
+}
+
+html .docs-prose .docs-task-item::marker {
+    content: "";
+}
+
+html .docs-prose .docs-task-checkbox {
+    display: inline-block;
+    flex: 0 0 auto;
+    position: relative;
+    top: 0 !important;
+    width: 16px;
+    height: 16px;
+    margin: 0 !important;
+    border: 1px solid var(--dracula-bg-tertiary);
+    border-radius: 4px;
+    background-color: var(--dracula-bg-secondary);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 12px 12px;
+    -webkit-appearance: none;
+    appearance: none;
+    vertical-align: middle !important;
+}
+
+html .docs-prose .docs-task-checkbox:checked {
+    border-color: var(--dracula-green);
+    background-color: var(--dracula-green);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.5 6.5 11.5 12.5 4.5' fill='none' stroke='%230e0d11' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+html .docs-prose .docs-task-checkbox:disabled {
+    opacity: 1;
+}
+
+html .docs-prose figure.docs-code-block {
+    position: relative;
+    margin-block: 1em;
+    overflow: hidden;
+    border: 1px solid var(--dracula-bg-tertiary);
+    border-radius: var(--dracula-radius-sm);
+    background: var(--dracula-code-bg);
+    color: var(--dracula-code-fg);
+    box-shadow: none;
+}
+
+html .docs-prose .docs-code-block-header {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    left: 1.125rem;
+    z-index: 1;
+    display: flex;
+    min-height: 28px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--dracula-caption);
+    pointer-events: none;
+}
+
+html .docs-prose .docs-code-block-label {
+    min-width: 0;
+    max-width: calc(100% - 44px);
+    overflow: hidden;
+    color: var(--dracula-caption);
+    font-family: "DM Mono", monospace, system-ui;
+    font-size: var(--dracula-font-size-code-label);
+    font-weight: 400;
+    line-height: 1;
+    text-transform: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+html .docs-prose .docs-code-copy {
+    position: relative;
+    width: 28px;
+    height: 28px;
+    min-height: 0;
+    overflow: hidden;
+    padding: 0;
+    border: 0;
+    border-radius: var(--dracula-radius-sm);
+    background: transparent;
+    color: transparent;
+    font-size: 0 !important;
+    line-height: 0;
+    text-indent: 100%;
+    white-space: nowrap;
+    box-shadow: none;
+    outline: 1px solid transparent;
+    pointer-events: auto;
+}
+
+html .docs-prose .docs-code-copy::before {
+    position: absolute;
+    inset: 7px;
+    display: block;
+    background: var(--dracula-caption);
+    content: "";
+    -webkit-mask: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2' stroke='black' stroke-width='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' stroke='black' stroke-width='2'/%3E%3C/svg%3E")
+        center / 14px 14px no-repeat;
+    mask: url("data:image/svg+xml,%3Csvg width='14' height='14' viewBox='0 0 24 24' fill='none' xmlns='http://www.w3.org/2000/svg'%3E%3Crect x='9' y='9' width='13' height='13' rx='2' ry='2' stroke='black' stroke-width='2'/%3E%3Cpath d='M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' stroke='black' stroke-width='2'/%3E%3C/svg%3E")
+        center / 14px 14px no-repeat;
+}
+
+html .docs-prose .docs-code-copy:hover,
+html .docs-prose .docs-code-copy:focus-visible {
+    outline-color: var(--dracula-bg-tertiary);
+}
+
+html .docs-prose .docs-code-copy:hover::before,
+html .docs-prose .docs-code-copy:focus-visible::before {
+    background: var(--dracula-display);
+}
+
+html .docs-prose .docs-code-block pre.hljs {
+    margin: 0;
+    max-height: none;
+    overflow-x: auto;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--dracula-code-fg);
+    padding: 2.75rem 3rem 0.75rem 1.125rem;
+    font-family: "DM Mono", monospace, system-ui;
+    font-size: var(--dracula-font-size-code);
+    line-height: 1.6;
+}
+
+html .docs-prose .docs-code-block pre.hljs code {
+    display: block;
+    color: inherit;
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+}
+
+html .docs-prose table {
+    overflow: hidden;
+    border-color: var(--dracula-bg-tertiary);
+    border-radius: var(--dracula-radius-sm);
+    font-size: var(--dracula-font-size-code);
+}
+
+html .docs-prose thead {
+    border-color: var(--dracula-bg-tertiary);
+    background: var(--dracula-bg-secondary);
+    color: var(--dracula-display);
+}
+
+html .docs-prose th,
+html .docs-prose td {
+    border-color: var(--dracula-bg-tertiary);
+    padding: 0.55rem 0.75rem;
+}
+
+html .docs-prose th {
+    color: var(--dracula-display);
+    font-weight: 600;
+}
+
+html .docs-prose td {
+    color: var(--dracula-body);
+}
+
+html .docs-markdown-editor,
+html .docs-prose .docs-math-block,
+html .docs-prose .beautiful-mermaid,
+html .docs-prose .mermaid,
+.mermaid-zoom-surface {
+    border: 1px solid var(--dracula-bg-tertiary);
+    border-radius: var(--dracula-radius-sm);
+    background: var(--dracula-code-bg);
+    color: var(--dracula-code-fg);
+    box-shadow: none;
+}
+
+html .docs-prose .docs-math-block {
+    padding: 1rem 1.125rem;
+}
+
+html .docs-prose .beautiful-mermaid,
+html .docs-prose .mermaid {
+    color: var(--dracula-code-fg);
+}
+
+html .docs-accordion-content {
+    color: var(--dracula-body);
+    line-height: 1.8;
+}
+
+html .docs-accordion-content code {
+    color: var(--dracula-display);
+}
+
+.docs-pin-panel-shell {
+    background: var(--dracula-bg-primary);
+}
+
+.docs-pin-panel-header,
+.docs-pin-item {
+    border-color: var(--dracula-bg-tertiary);
+}
+
+.docs-pin-item,
+.docs-markdown-editor,
+.docs-pin-context-menu,
+.docs-pin-toast,
+[cmdk-root],
+[role="dialog"],
+[data-radix-popper-content-wrapper] > * {
+    border-color: var(--dracula-bg-tertiary);
+    background: var(--dracula-bg-secondary);
+    color: var(--dracula-body);
+    border-radius: var(--dracula-radius-sm);
+    box-shadow: none;
+}
+
+[role="menuitem"],
+[cmdk-item] {
+    border-radius: var(--dracula-radius-sm);
+}
+
+[role="menuitem"]:hover,
+[cmdk-item][data-selected="true"] {
+    background: var(--dracula-bg-tertiary);
+    color: var(--dracula-display);
+}
+
+.docs-markdown-editor {
+    --docs-editor-font: "DM Mono", monospace, system-ui;
+}
+
+.docs-markdown-editor,
+.docs-markdown-editor-highlight {
+    color: var(--dracula-code-fg);
+}
+
+.docs-markdown-editor-input {
+    caret-color: var(--dracula-color);
+}
+
+.docs-code-theme-github-dark,
+.docs-code-theme-github-light,
+.docs-code-theme-atom-one-dark,
+.docs-code-theme-atom-one-light,
+.docs-code-theme-night-owl,
+.docs-code-theme-nord,
+.docs-code-theme-monokai,
+.docs-code-theme-quiet-light,
+.docs-code-theme-solarized-light,
+.docs-code-theme-xcode-light {
+    --docs-code-comment: var(--dracula-code-comment);
+    --docs-code-keyword: var(--dracula-pink);
+    --docs-code-title: var(--dracula-green);
+    --docs-code-constant: var(--dracula-orange);
+    --docs-code-string: var(--dracula-yellow);
+    --docs-code-variable: var(--dracula-cyan);
+    --docs-code-tag: var(--dracula-green);
+    --docs-code-meta: var(--dracula-code-comment);
+    --docs-code-addition-fg: var(--dracula-green);
+    --docs-code-addition-bg: color-mix(in srgb, var(--dracula-green) 14%, var(--dracula-code-bg));
+    --docs-code-deletion-fg: var(--dracula-red);
+    --docs-code-deletion-bg: color-mix(in srgb, var(--dracula-red) 14%, var(--dracula-code-bg));
+}
+
+.docs-prose .hljs-comment,
+.docs-prose .hljs-quote {
+    color: var(--dracula-code-comment);
+}
+
+.docs-prose .hljs-keyword,
+.docs-prose .hljs-selector-tag,
+.docs-prose .hljs-type {
+    color: var(--dracula-pink);
+}
+
+.docs-prose .hljs-title,
+.docs-prose .hljs-title.class_,
+.docs-prose .hljs-title.function_,
+.docs-prose .hljs-section,
+.docs-prose .hljs-selector-id {
+    color: var(--dracula-green);
+}
+
+.docs-prose .hljs-number,
+.docs-prose .hljs-literal,
+.docs-prose .hljs-symbol,
+.docs-prose .hljs-bullet {
+    color: var(--dracula-orange);
+}
+
+.docs-prose .hljs-variable,
+.docs-prose .hljs-template-variable,
+.docs-prose .hljs-attr,
+.docs-prose .hljs-attribute,
+.docs-prose .hljs-property {
+    color: var(--dracula-cyan);
+}
+
+.docs-prose .hljs-string,
+.docs-prose .hljs-doctag,
+.docs-prose .hljs-regexp,
+.docs-prose .hljs-link {
+    color: var(--dracula-yellow);
+}
+
+.docs-prose .hljs-name,
+.docs-prose .hljs-tag {
+    color: var(--dracula-green);
+}
+
+@media (max-width: 768px) {
+    html .docs-prose {
+        font-size: var(--dracula-font-size-prose);
+    }
+
+    html .docs-prose > .contents > h1 {
+        font-size: 2.4rem;
+    }
+
+    html .docs-prose .docs-code-block pre.hljs {
+        padding-right: 2.75rem;
+    }
+}
+
+/* Article font scale */
+html body .docs-prose {
+    --dracula-font-size-prose: calc(0.9375rem * var(--docs-article-font-scale, 1));
+    --dracula-font-size-code: calc(0.875rem * var(--docs-article-font-scale, 1));
+    --dracula-font-size-code-label: calc(0.6875rem * var(--docs-article-font-scale, 1));
+    --docs-article-body-font-size: var(--dracula-font-size-prose);
+    --docs-article-small-font-size: calc(0.8125rem * var(--docs-article-font-scale, 1));
+    --docs-article-code-font-size: var(--dracula-font-size-code);
+    font-size: var(--docs-article-body-font-size);
+    line-height: 1.65;
+}
+
+html body .docs-prose > .contents > h1 {
+    font-size: 2.56em;
+}
+
+html body .docs-prose > .contents > h2 {
+    font-size: 1.55em;
+}
+
+html body .docs-prose > .contents > h3 {
+    font-size: 1.2em;
+}
+
+html body .docs-prose > .contents > h4,
+html body .docs-prose p,
+html body .docs-prose li,
+html body .docs-prose blockquote,
+html body .docs-prose dl,
+html body .docs-prose details {
+    font-size: inherit;
+}
+
+html body .docs-prose table,
+html body .docs-prose figcaption,
+html body .docs-prose .docs-math-placeholder {
+    font-size: var(--docs-article-code-font-size);
+}
+
+html body .docs-prose .docs-code-block-header,
+html body .docs-prose .docs-accordion-trigger,
+html body .docs-prose .docs-accordion-panel {
+    font-size: var(--docs-article-small-font-size);
+}
+
+html body .docs-prose .docs-code-block-header {
+    line-height: 1.4;
+}
+
+html body .docs-prose .docs-code-block-label {
+    font-size: var(--dracula-font-size-code-label);
+    line-height: 1;
+}
+
+html body .docs-prose .docs-code-block pre.hljs,
+html body .docs-prose .docs-code-block pre.hljs code {
+    font-size: var(--docs-article-code-font-size) !important;
+    line-height: var(--docs-code-line-height, 1.6) !important;
+}
+
+html body .docs-accordion-content,
+html body .docs-accordion-content p,
+html body .docs-accordion-content li {
+    font-size: inherit;
+    line-height: 1.65;
+}

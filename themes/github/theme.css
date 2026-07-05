@@ -1,0 +1,1071 @@
+@font-face {
+    font-family: "Mona Sans";
+    font-display: swap;
+    font-weight: 200 900;
+    font-stretch: 75% 125%;
+    src: url("https://github.githubassets.com/assets/mona-sans-d1bf285e9b9b.woff2") format("woff2");
+}
+
+html:root,
+html.dark {
+    --github-canvas-default: #0d1117;
+    --github-canvas-overlay: #010409;
+    --github-canvas-subtle: #151b23;
+    --github-canvas-inset: #010409;
+    --github-canvas-muted: #212830;
+    --github-border-default: #3d444d;
+    --github-border-muted: #3d444db3;
+    --github-border-subtle: #ffffff26;
+    --github-fg-default: #f0f6fc;
+    --github-fg-muted: #9198a1;
+    --github-fg-subtle: #656c76;
+    --github-fg-on-emphasis: #ffffff;
+    --github-accent-fg: #4493f8;
+    --github-accent-emphasis: #1f6feb;
+    --github-accent-muted: #388bfd1a;
+    --github-success-fg: #3fb950;
+    --github-success-emphasis: #238636;
+    --github-success-hover: #2ea043;
+    --github-attention-fg: #d29922;
+    --github-danger-fg: #f85149;
+    --github-done-fg: #ab7df8;
+    --github-sponsors-fg: #db61a2;
+    --github-neutral-muted: #656c7633;
+    --github-header-bg: #151b23f2;
+    --github-header-border: #656c76;
+    --github-button-bg: #212830;
+    --github-button-hover-bg: #262c36;
+    --github-button-active-bg: #2a313c;
+    --github-shadow-resting: 0 1px 1px 0 #01040999, 0 1px 3px 0 #01040999;
+    --github-shadow-floating:
+        0 0 0 1px #3d444d, 0 8px 16px -4px #01040966, 0 4px 32px -4px #01040966;
+    --github-radius-small: 3px;
+    --github-radius: 6px;
+    --github-radius-large: 12px;
+    --github-font:
+        "Mona Sans", "Mona Sans VF", -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans",
+        Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+    --github-mono:
+        ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+    --background: 216 28% 7%;
+    --foreground: 210 17% 93.7%;
+    --card: 215 24% 11%;
+    --card-foreground: 210 17% 93.7%;
+    --popover: 220 25% 3%;
+    --popover-foreground: 210 17% 93.7%;
+    --primary: 212 93% 62%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 214 20% 16%;
+    --secondary-foreground: 210 17% 93.7%;
+    --muted: 214 20% 16%;
+    --muted-foreground: 213 9% 60%;
+    --accent: 214 20% 16%;
+    --accent-foreground: 210 17% 93.7%;
+    --destructive: 2 93% 63%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 11% 27%;
+    --input: 214 16% 22%;
+    --ring: 212 81% 52%;
+    --radius: 0.375rem;
+    --sidebar-background: 216 28% 7%;
+    --sidebar-foreground: 213 9% 60%;
+    --sidebar-primary: 212 81% 52%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 214 20% 16%;
+    --sidebar-accent-foreground: 210 17% 93.7%;
+    --sidebar-border: 214 11% 27%;
+    --sidebar-ring: 212 81% 52%;
+    --docs-mermaid-background: 215 24% 11%;
+}
+
+::selection {
+    background: #1f6febb3;
+    color: var(--github-fg-default);
+}
+
+html,
+body {
+    background: var(--github-canvas-default);
+    color: var(--github-fg-default);
+    font-family: var(--github-font);
+    letter-spacing: 0;
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+button,
+input,
+select,
+textarea {
+    font-family: inherit;
+}
+
+pre,
+code,
+kbd,
+samp,
+.docs-prose .docs-code-block-label,
+.docs-markdown-editor {
+    font-family: var(--github-mono);
+}
+
+a,
+button,
+[role="button"],
+[data-sidebar="menu-button"],
+[data-sidebar="menu-sub-button"],
+.docs-prose .docs-code-copy {
+    transition:
+        color 80ms cubic-bezier(0.33, 1, 0.68, 1),
+        background-color 80ms cubic-bezier(0.33, 1, 0.68, 1),
+        border-color 80ms cubic-bezier(0.33, 1, 0.68, 1),
+        box-shadow 80ms cubic-bezier(0.33, 1, 0.68, 1);
+}
+
+a:focus-visible,
+button:focus-visible,
+[role="button"]:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+.docs-prose .docs-mermaid-zoomable:focus-visible {
+    outline: 2px solid var(--github-accent-emphasis) !important;
+    outline-offset: -2px;
+    box-shadow: none !important;
+}
+
+#root header {
+    border-bottom: 1px solid var(--github-border-default);
+    background: var(--github-header-bg);
+    color: var(--github-fg-default);
+    backdrop-filter: blur(12px);
+}
+
+#root header > div {
+    min-height: 64px;
+    padding-inline: 16px;
+}
+
+#root header a,
+#root header button,
+#root header [role="button"] {
+    border-radius: var(--github-radius);
+    color: var(--github-fg-default);
+    font-size: 14px;
+    font-weight: 500;
+}
+
+#root header a:hover,
+#root header button:hover,
+#root header [role="button"]:hover {
+    background: var(--github-button-hover-bg);
+    color: var(--github-fg-default);
+}
+
+[data-sidebar="sidebar"],
+[data-sidebar="header"],
+[data-sidebar="footer"],
+[data-sidebar="content"],
+[data-sidebar="inset"],
+main {
+    background: var(--github-canvas-default);
+}
+
+[data-sidebar="sidebar"] {
+    border-color: var(--github-border-default);
+    box-shadow: inset -1px 0 var(--github-border-default);
+    color: var(--github-fg-muted);
+}
+
+[data-sidebar="content"] {
+    padding: 16px 12px;
+}
+
+[data-sidebar="group-label"] {
+    height: 32px;
+    padding-inline: 8px;
+    color: var(--github-fg-subtle);
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0;
+}
+
+[data-sidebar="menu"] {
+    gap: 2px;
+}
+
+[data-sidebar="menu-sub"] {
+    border-color: var(--github-border-default);
+    gap: 2px;
+}
+
+[data-sidebar="menu-button"],
+[data-sidebar="menu-sub-button"] {
+    min-height: 30px;
+    border: 1px solid transparent;
+    border-radius: var(--github-radius);
+    color: var(--github-fg-muted);
+    font-size: 14px;
+    font-weight: 400;
+}
+
+[data-sidebar="menu-button"]:hover,
+[data-sidebar="menu-sub-button"]:hover {
+    border-color: transparent;
+    background: var(--github-button-hover-bg) !important;
+    color: var(--github-fg-default) !important;
+}
+
+[data-sidebar="menu-button"][data-active="true"],
+[data-sidebar="menu-sub-button"][data-active="true"] {
+    border-color: var(--github-border-default);
+    background: var(--github-canvas-muted) !important;
+    color: var(--github-fg-default) !important;
+    font-weight: 600 !important;
+    box-shadow: var(--github-shadow-resting);
+}
+
+[data-sidebar="footer"] {
+    border-color: var(--github-border-default);
+    padding: 16px;
+}
+
+[data-sidebar="footer"] .bg-sidebar-primary {
+    background: var(--github-success-emphasis);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 12%);
+}
+
+.docs-sidebar-resizer::after,
+.docs-pin-resizer::after {
+    background: var(--github-border-default);
+}
+
+.docs-sidebar-resizer:hover::after,
+.docs-sidebar-resizer:focus-visible::after,
+.docs-pin-resizer:hover::after,
+.docs-pin-resizer:focus-visible::after {
+    background: var(--github-accent-emphasis);
+}
+
+main {
+    color: var(--github-fg-default);
+}
+
+main > div > div:first-child {
+    padding-top: 32px;
+}
+
+main h1.break-words {
+    margin-bottom: 0;
+    border-bottom: 0;
+    padding-bottom: 0;
+    color: var(--github-fg-default);
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.docs-page-header {
+    margin-bottom: 28px;
+}
+
+.docs-page-header > [role="none"][aria-orientation="horizontal"] {
+    margin-top: 24px !important;
+    border-color: var(--github-border-muted);
+    background-color: var(--github-border-muted);
+}
+
+[aria-label="Breadcrumb"] ol,
+main [aria-label="breadcrumb"],
+main nav[aria-label="Breadcrumb"] {
+    color: var(--github-fg-muted);
+    font-size: 14px;
+}
+
+main [role="none"],
+.bg-border {
+    background-color: var(--github-border-default);
+}
+
+.docs-prose {
+    color: var(--github-fg-default);
+    font-size: 16px;
+    line-height: 1.5;
+    letter-spacing: 0;
+}
+
+.docs-prose > .contents > h2 {
+    margin: 24px 0 16px;
+    border-bottom: 1px solid var(--github-border-muted);
+    padding-bottom: 0.3em;
+    color: var(--github-fg-default);
+    font-size: 24px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.docs-prose > .contents > h3 {
+    margin: 24px 0 16px;
+    color: var(--github-fg-default);
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.docs-prose > .contents > h4 {
+    margin: 24px 0 16px;
+    color: var(--github-fg-default);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.25;
+}
+
+.docs-prose p,
+.docs-prose li {
+    color: var(--github-fg-default);
+}
+
+.docs-prose p,
+.docs-prose blockquote,
+.docs-prose ul,
+.docs-prose ol,
+.docs-prose dl,
+.docs-prose table,
+.docs-prose pre,
+.docs-prose details {
+    margin-top: 0;
+    margin-bottom: 16px;
+}
+
+.docs-prose ul,
+.docs-prose ol {
+    padding-left: 2em;
+}
+
+.docs-prose ul {
+    list-style-type: disc;
+}
+
+.docs-prose ol {
+    list-style-type: decimal;
+}
+
+.docs-prose ol ol,
+.docs-prose ul ol {
+    list-style-type: lower-roman;
+}
+
+.docs-prose ul ul ol,
+.docs-prose ul ol ol,
+.docs-prose ol ul ol,
+.docs-prose ol ol ol {
+    list-style-type: lower-alpha;
+}
+
+.docs-prose li {
+    margin: 0.25em 0;
+    padding-left: 0;
+}
+
+.docs-prose li + li {
+    margin-top: 0.25em;
+}
+
+.docs-prose li::marker {
+    color: var(--github-fg-muted);
+}
+
+.docs-prose li > p {
+    margin: 0;
+}
+
+.docs-prose li > p + p {
+    margin-top: 16px;
+}
+
+.docs-prose strong {
+    color: var(--github-fg-default);
+    font-weight: 600;
+}
+
+.docs-prose em {
+    color: var(--github-fg-default);
+}
+
+.docs-prose a {
+    color: var(--github-accent-fg);
+    font-weight: 400;
+    text-decoration: none;
+}
+
+.docs-prose a:hover {
+    color: var(--github-accent-fg);
+    text-decoration: underline;
+}
+
+.docs-prose blockquote {
+    margin: 0 0 16px;
+    border-left: 0.25em solid var(--github-border-default);
+    padding: 0 1em;
+    color: var(--github-fg-muted);
+}
+
+.docs-prose blockquote > :first-child {
+    margin-top: 0;
+}
+
+.docs-prose blockquote > :last-child {
+    margin-bottom: 0;
+}
+
+.docs-prose hr {
+    height: 0.25em;
+    margin: 24px 0;
+    border: 0;
+    background: var(--github-border-default);
+}
+
+.docs-prose img {
+    border-radius: var(--github-radius);
+    background: var(--github-canvas-subtle);
+}
+
+.docs-prose :not(pre) > code,
+.docs-accordion-content code {
+    border: 0;
+    border-radius: var(--github-radius);
+    background: var(--github-neutral-muted);
+    color: var(--github-fg-default);
+    padding: 0.2em 0.4em;
+    font-size: 85%;
+    font-weight: 400;
+}
+
+html .docs-markdown-editor,
+html .docs-prose .docs-math-block,
+html .docs-prose .beautiful-mermaid,
+html .docs-prose .mermaid {
+    border: 1px solid var(--github-border-default);
+    border-radius: var(--github-radius);
+    background: var(--github-canvas-subtle);
+    box-shadow: none;
+}
+
+html .docs-prose figure.docs-code-block {
+    position: relative;
+    margin: 16px 0;
+    overflow: hidden;
+    border: 1px solid var(--github-border-default);
+    border-radius: var(--github-radius);
+    background: var(--github-canvas-subtle);
+    color: var(--github-fg-default);
+}
+
+html .docs-prose .docs-code-block-header {
+    display: flex;
+    min-height: 40px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    border-bottom: 1px solid var(--github-border-default);
+    background: var(--github-canvas-muted);
+    padding: 8px 12px;
+    color: var(--github-fg-muted);
+}
+
+html .docs-prose .docs-code-block-label {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--github-fg-muted);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1;
+    text-overflow: ellipsis;
+    text-transform: none;
+    white-space: nowrap;
+}
+
+html .docs-prose .docs-code-copy {
+    display: inline-flex;
+    height: 28px;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--github-border-default);
+    border-radius: var(--github-radius);
+    background: var(--github-button-bg);
+    color: var(--github-fg-default);
+    padding: 3px 10px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 20px;
+    box-shadow: var(--github-shadow-resting);
+}
+
+html .docs-prose .docs-code-copy:hover {
+    border-color: var(--github-border-subtle);
+    background: var(--github-button-hover-bg);
+    color: var(--github-fg-default);
+}
+
+html .docs-prose .docs-code-copy[data-copied="true"] {
+    color: var(--github-success-fg);
+}
+
+html .docs-prose .docs-code-block pre.hljs {
+    margin: 0;
+    max-height: none;
+    overflow-x: auto;
+    border: 0;
+    border-radius: 0;
+    background: var(--github-canvas-subtle);
+    color: #c9d1d9;
+    padding: 16px;
+    font-family: var(--github-mono);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+html .docs-prose .docs-code-block pre.hljs code {
+    display: block;
+    background: transparent;
+    color: inherit;
+    padding: 0;
+    font-family: inherit;
+    font-size: inherit;
+    font-weight: 400;
+    line-height: inherit;
+}
+
+.docs-code-theme-github-dark,
+.docs-code-theme-github-light,
+.docs-code-theme-atom-one-dark,
+.docs-code-theme-atom-one-light,
+.docs-code-theme-night-owl,
+.docs-code-theme-nord,
+.docs-code-theme-monokai,
+.docs-code-theme-quiet-light,
+.docs-code-theme-solarized-light,
+.docs-code-theme-xcode-light {
+    --docs-code-comment: #8b949e;
+    --docs-code-keyword: #ff7b72;
+    --docs-code-title: #d2a8ff;
+    --docs-code-constant: #79c0ff;
+    --docs-code-string: #a5d6ff;
+    --docs-code-variable: #ffa657;
+    --docs-code-tag: #7ee787;
+    --docs-code-meta: #8b949e;
+    --docs-code-addition-fg: #aff5b4;
+    --docs-code-addition-bg: #033a16;
+    --docs-code-deletion-fg: #ffdcd7;
+    --docs-code-deletion-bg: #67060c;
+}
+
+.docs-prose .hljs-comment,
+.docs-prose .hljs-quote {
+    color: #8b949e;
+}
+
+.docs-prose .hljs-keyword,
+.docs-prose .hljs-selector-tag,
+.docs-prose .hljs-type {
+    color: #ff7b72;
+}
+
+.docs-prose .hljs-title,
+.docs-prose .hljs-title.class_,
+.docs-prose .hljs-title.function_,
+.docs-prose .hljs-section,
+.docs-prose .hljs-selector-id {
+    color: #d2a8ff;
+}
+
+.docs-prose .hljs-number,
+.docs-prose .hljs-literal,
+.docs-prose .hljs-symbol,
+.docs-prose .hljs-bullet,
+.docs-prose .hljs-variable,
+.docs-prose .hljs-template-variable,
+.docs-prose .hljs-attr,
+.docs-prose .hljs-attribute,
+.docs-prose .hljs-property {
+    color: #79c0ff;
+}
+
+.docs-prose .hljs-string,
+.docs-prose .hljs-doctag,
+.docs-prose .hljs-regexp,
+.docs-prose .hljs-link {
+    color: #a5d6ff;
+}
+
+.docs-prose .hljs-built_in,
+.docs-prose .hljs-builtin-name {
+    color: #ffa657;
+}
+
+.docs-prose .hljs-name,
+.docs-prose .hljs-tag {
+    color: #7ee787;
+}
+
+.docs-prose .hljs-meta {
+    color: #8b949e;
+}
+
+.docs-prose table {
+    display: table;
+    width: 100%;
+    overflow: hidden;
+    border-collapse: collapse;
+    border-spacing: 0;
+    color: var(--github-fg-default);
+    font-size: 14px;
+}
+
+.docs-prose thead {
+    border: 0;
+    background: transparent;
+}
+
+.docs-prose tr {
+    border-top: 1px solid var(--github-border-default);
+    background: var(--github-canvas-default);
+}
+
+.docs-prose tr:nth-child(2n) {
+    background: var(--github-canvas-subtle);
+}
+
+.docs-prose th,
+.docs-prose td {
+    border: 1px solid var(--github-border-default);
+    padding: 6px 13px;
+    color: var(--github-fg-default);
+}
+
+.docs-prose th {
+    font-weight: 600;
+}
+
+.docs-prose :where(ul, ol).docs-task-list {
+    margin: 0 0 16px;
+    padding-left: 0;
+    list-style: none;
+}
+
+.docs-prose :where(ul, ol).docs-task-list > li {
+    margin: 0.25em 0;
+}
+
+.docs-prose :where(ul, ol).docs-task-list > li:not(.docs-task-item) {
+    display: list-item;
+    margin-left: 2em;
+    padding-left: 0;
+    list-style-type: disc;
+}
+
+.docs-prose .docs-task-item {
+    list-style: none;
+}
+
+.docs-prose .docs-task-item::marker {
+    content: "";
+}
+
+.docs-prose .docs-task-item > p {
+    margin: 0;
+}
+
+.docs-prose .docs-task-checkbox {
+    position: relative;
+    top: 0.15em !important;
+    width: 16px;
+    height: 16px;
+    margin: 0 0.5em 0.25em 0 !important;
+    border: 1px solid var(--github-border-default);
+    border-radius: 4px;
+    background: var(--github-canvas-inset);
+    accent-color: var(--github-success-emphasis);
+    vertical-align: middle;
+}
+
+.docs-prose .docs-task-checkbox:checked {
+    border-color: var(--github-success-emphasis);
+    background-color: var(--github-success-emphasis);
+}
+
+.docs-prose .docs-task-checkbox:disabled {
+    opacity: 1;
+}
+
+.docs-prose .docs-math-block {
+    margin: 16px 0;
+    padding: 16px;
+    color: var(--github-fg-default);
+}
+
+.docs-prose .docs-math-inline {
+    color: var(--github-fg-default);
+}
+
+.docs-prose .docs-math-placeholder {
+    color: var(--github-fg-muted);
+    font-family: var(--github-mono);
+    font-size: 13px;
+}
+
+.docs-prose .beautiful-mermaid,
+.docs-prose .mermaid,
+.mermaid-zoom-surface {
+    --beautiful-mermaid-autonumber-bg: var(--github-canvas-subtle);
+    --beautiful-mermaid-autonumber-border: var(--github-fg-muted);
+    --beautiful-mermaid-autonumber-text: var(--github-fg-default);
+    margin: 16px 0;
+    padding: 16px;
+    background: var(--github-canvas-subtle);
+    color: var(--github-fg-default);
+}
+
+.docs-prose .beautiful-mermaid svg,
+.docs-prose .mermaid svg,
+.mermaid-zoom-surface svg {
+    --muted: var(--github-fg-muted) !important;
+    --_text: var(--github-fg-default) !important;
+    --_text-sec: var(--github-fg-muted) !important;
+    --_text-muted: var(--github-fg-muted) !important;
+    --_text-faint: var(--github-fg-subtle) !important;
+}
+
+.docs-prose .docs-mermaid-zoomable:hover {
+    border-color: var(--github-accent-emphasis);
+}
+
+.docs-prose .beautiful-mermaid--error {
+    border-color: var(--github-danger-fg);
+    color: var(--github-danger-fg);
+}
+
+.docs-accordion-content {
+    color: var(--github-fg-default);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.docs-accordion-content p {
+    margin: 0 0 16px;
+}
+
+.docs-accordion-content ul,
+.docs-accordion-content ol {
+    margin: 0 0 16px;
+    padding-left: 2em;
+}
+
+.docs-accordion-content ul {
+    list-style: disc;
+}
+
+.docs-accordion-content ol {
+    list-style: decimal;
+}
+
+[data-radix-collection-item],
+[data-state],
+[role="menuitem"],
+[cmdk-item] {
+    border-radius: var(--github-radius);
+}
+
+.docs-toc-panel-desktop,
+.docs-pin-panel-desktop .docs-pin-panel-shell,
+.docs-pin-panel-header,
+.docs-pin-item {
+    border-color: var(--github-border-default);
+}
+
+.docs-toc-desktop {
+    color: var(--github-fg-muted);
+    font-size: 12px;
+}
+
+.docs-toc-desktop a {
+    border-radius: var(--github-radius);
+    color: var(--github-fg-muted);
+    font-size: 12px;
+}
+
+.docs-toc-desktop a:hover {
+    background: var(--github-button-hover-bg);
+    color: var(--github-fg-default);
+}
+
+.docs-toc-desktop a.bg-accent {
+    background: var(--github-canvas-muted);
+    color: var(--github-fg-default);
+    font-weight: 600;
+}
+
+.docs-pin-panel-shell {
+    background: var(--github-canvas-default);
+}
+
+.docs-pin-item {
+    border-radius: var(--github-radius);
+    background: var(--github-canvas-subtle);
+    padding: 12px;
+}
+
+.docs-pin-context-menu,
+.docs-pin-toast,
+[cmdk-root],
+[role="dialog"],
+[data-radix-popper-content-wrapper] > * {
+    border-color: var(--github-border-default);
+    background: var(--github-canvas-overlay);
+    color: var(--github-fg-default);
+    box-shadow: var(--github-shadow-floating);
+}
+
+[role="menuitem"]:hover,
+[cmdk-item][data-selected="true"] {
+    background: var(--github-canvas-muted);
+    color: var(--github-fg-default);
+}
+
+.docs-settings-dialog aside {
+    background: var(--github-canvas-subtle);
+}
+
+.docs-markdown-editor {
+    --docs-editor-font: var(--github-mono);
+    color: var(--github-fg-default);
+    background: var(--github-canvas-subtle);
+}
+
+.docs-markdown-editor-highlight {
+    color: var(--github-fg-default);
+}
+
+.docs-markdown-editor-input {
+    caret-color: var(--github-accent-fg);
+}
+
+@supports selector(:has(*)) {
+    .docs-prose > .contents > h2 + ul:has(> li > a:only-child) {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 8px;
+        margin-top: 16px;
+        padding: 0;
+        list-style: none;
+    }
+
+    .docs-prose > .contents > h2 + ul:has(> li > a:only-child) > li {
+        margin: 0;
+        padding: 0;
+    }
+
+    .docs-prose > .contents > h2 + ul:has(> li > a:only-child) > li > a {
+        display: flex;
+        min-height: 112px;
+        flex-direction: column;
+        justify-content: space-between;
+        border: 1px solid var(--github-border-default);
+        border-radius: var(--github-radius);
+        background: var(--github-canvas-subtle);
+        color: var(--github-fg-default);
+        padding: 16px;
+        text-decoration: none;
+    }
+
+    .docs-prose > .contents > h2 + ul:has(> li > a:only-child) > li > a::before {
+        width: 32px;
+        height: 32px;
+        border-radius: var(--github-radius);
+        background: linear-gradient(135deg, var(--github-done-fg), var(--github-accent-fg));
+        content: "";
+    }
+
+    .docs-prose > .contents > h2 + ul:has(> li > a:only-child) > li > a:hover {
+        border-color: var(--github-accent-emphasis);
+        background: var(--github-canvas-muted);
+    }
+}
+
+@media (max-width: 768px) {
+    #root header > div {
+        padding-inline: 12px;
+    }
+
+    main > div > div:first-child {
+        padding-top: 24px;
+    }
+
+    main h1.break-words {
+        font-size: 26px;
+    }
+
+    .docs-prose {
+        font-size: 15px;
+    }
+
+    .docs-prose > .contents > h2 {
+        font-size: 22px;
+    }
+}
+
+html body .docs-prose {
+    color: var(--github-fg-default);
+    font-size: 16px;
+    line-height: 24px;
+}
+
+html body .docs-prose > .contents > h1 {
+    display: block !important;
+    margin: 24px 0 16px;
+    border-bottom: 1px solid var(--github-border-muted);
+    padding-bottom: 0.3em;
+    color: var(--github-fg-default);
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 40px;
+}
+
+html body .docs-prose > .contents > h2 {
+    margin: 24px 0 16px;
+    padding-bottom: 0.3em;
+    color: var(--github-fg-default);
+    font-size: 24px;
+    line-height: 30px;
+}
+
+html body .docs-prose > .contents > h3 {
+    margin: 24px 0 16px;
+    color: var(--github-fg-default);
+    font-size: 20px;
+    line-height: 25px;
+}
+
+html body .docs-prose > .contents > h4 {
+    margin: 24px 0 16px;
+    color: var(--github-fg-default);
+    font-size: 16px;
+    line-height: 20px;
+}
+
+html body .docs-prose p,
+html body .docs-prose li {
+    color: var(--github-fg-default);
+    font-size: 16px;
+    line-height: 24px;
+}
+
+html body .docs-prose :where(ul, ol) {
+    margin: 0 0 16px;
+    padding-left: 2em;
+}
+
+html body .docs-prose li {
+    margin: 0.25em 0;
+}
+
+html body .docs-prose :not(pre) > code,
+html body .docs-accordion-content code {
+    font-size: 85%;
+}
+
+html body .docs-prose .docs-task-checkbox {
+    width: 16px;
+    height: 16px;
+    border: 1px solid var(--github-border-default);
+    border-radius: 4px;
+    background-color: var(--github-canvas-inset);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: 12px 12px;
+    -webkit-appearance: none;
+    appearance: none;
+    vertical-align: -0.125em !important;
+}
+
+html body .docs-prose .docs-task-checkbox:checked {
+    border-color: var(--github-success-emphasis);
+    background-color: var(--github-success-emphasis);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.75 8.25 6.75 11.25 12.25 4.75' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+
+html body .docs-accordion-content,
+html body .docs-accordion-content p,
+html body .docs-accordion-content li {
+    color: var(--github-fg-default);
+    font-size: var(--docs-article-body-font-size);
+    line-height: 24px;
+}
+
+/* Article font scale */
+html body .docs-prose {
+    --docs-article-body-font-size: calc(1rem * var(--docs-article-font-scale, 1));
+    --docs-article-small-font-size: calc(0.875rem * var(--docs-article-font-scale, 1));
+    --docs-article-code-font-size: calc(0.8125rem * var(--docs-article-font-scale, 1));
+    font-size: var(--docs-article-body-font-size);
+    line-height: 1.5;
+}
+
+html body .docs-prose > .contents > h1 {
+    font-size: 2em;
+    line-height: 1.25;
+}
+
+html body .docs-prose > .contents > h2 {
+    font-size: 1.5em;
+    line-height: 1.25;
+}
+
+html body .docs-prose > .contents > h3 {
+    font-size: 1.25em;
+    line-height: 1.25;
+}
+
+html body .docs-prose > .contents > h4,
+html body .docs-prose p,
+html body .docs-prose li,
+html body .docs-prose blockquote,
+html body .docs-prose dl,
+html body .docs-prose details {
+    font-size: inherit;
+}
+
+html body .docs-prose table,
+html body .docs-prose figcaption,
+html body .docs-prose .docs-math-placeholder {
+    font-size: var(--docs-article-small-font-size);
+}
+
+html body .docs-prose .docs-code-block-header,
+html body .docs-prose .docs-code-block-label,
+html body .docs-prose .docs-code-copy,
+html body .docs-prose .docs-accordion-trigger,
+html body .docs-prose .docs-accordion-panel {
+    font-size: var(--docs-article-small-font-size);
+}
+
+html body .docs-prose .docs-code-block-header,
+html body .docs-prose .docs-code-block-label,
+html body .docs-prose .docs-code-copy {
+    line-height: 1.4;
+}
+
+html body .docs-prose .docs-code-block pre.hljs,
+html body .docs-prose .docs-code-block pre.hljs code {
+    font-size: var(--docs-article-code-font-size) !important;
+    line-height: var(--docs-code-line-height, 1.6) !important;
+}
+
+html body .docs-accordion-content,
+html body .docs-accordion-content p,
+html body .docs-accordion-content li {
+    font-size: inherit;
+    line-height: 1.5;
+}

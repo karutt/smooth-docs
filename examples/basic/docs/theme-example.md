@@ -6,6 +6,12 @@ Change the theme in `smooth-docs.yml`:
 theme: compact
 ```
 
+For a Linear-inspired theme:
+
+```yaml
+theme: linear
+```
+
 Or point at a local theme directory:
 
 ```yaml
