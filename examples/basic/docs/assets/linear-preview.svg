@@ -1,0 +1,35 @@
+<svg width="960" height="540" viewBox="0 0 960 540" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Linear-style preview panel</title>
+  <desc id="desc">A dark product documentation preview panel with navigation, content rows, and chart accents.</desc>
+  <defs>
+    <clipPath id="linear-preview-chart-clip">
+      <rect x="292" y="326" width="248" height="92" rx="14"/>
+    </clipPath>
+  </defs>
+  <rect width="960" height="540" rx="32" fill="#08090A"/>
+  <rect x="48" y="44" width="864" height="452" rx="24" fill="#0F1011" stroke="#23252A"/>
+  <rect x="80" y="84" width="180" height="372" rx="16" fill="#111317" stroke="#23252A"/>
+  <circle cx="112" cy="118" r="10" fill="#5E6AD2"/>
+  <rect x="136" y="111" width="78" height="14" rx="7" fill="#E7E8EA"/>
+  <rect x="104" y="160" width="116" height="10" rx="5" fill="#828FFF"/>
+  <rect x="104" y="192" width="92" height="10" rx="5" fill="#6B6F76"/>
+  <rect x="104" y="224" width="128" height="10" rx="5" fill="#6B6F76"/>
+  <rect x="104" y="256" width="74" height="10" rx="5" fill="#6B6F76"/>
+  <rect x="292" y="84" width="312" height="28" rx="14" fill="#17191E" stroke="#23252A"/>
+  <rect x="316" y="93" width="174" height="10" rx="5" fill="#A9ADB5"/>
+  <rect x="292" y="144" width="520" height="34" rx="8" fill="#15171B" stroke="#23252A"/>
+  <rect x="316" y="156" width="226" height="10" rx="5" fill="#E7E8EA"/>
+  <circle cx="778" cy="161" r="7" fill="#5E6AD2"/>
+  <rect x="292" y="198" width="520" height="34" rx="8" fill="#15171B" stroke="#23252A"/>
+  <rect x="316" y="210" width="284" height="10" rx="5" fill="#A9ADB5"/>
+  <circle cx="778" cy="215" r="7" fill="#2B2D33"/>
+  <rect x="292" y="252" width="520" height="34" rx="8" fill="#15171B" stroke="#23252A"/>
+  <rect x="316" y="264" width="198" height="10" rx="5" fill="#A9ADB5"/>
+  <circle cx="778" cy="269" r="7" fill="#2B2D33"/>
+  <rect x="292" y="326" width="248" height="92" rx="14" fill="#14161A" stroke="#23252A"/>
+  <path d="M318 386C344 354 371 366 394 344C423 332 452 352 474 338C488 330 506 338 516 344" stroke="#5E6AD2" stroke-width="6" stroke-linecap="round" clip-path="url(#linear-preview-chart-clip)"/>
+  <rect x="572" y="326" width="240" height="92" rx="14" fill="#14161A" stroke="#23252A"/>
+  <rect x="600" y="354" width="68" height="12" rx="6" fill="#E7E8EA"/>
+  <rect x="600" y="382" width="148" height="10" rx="5" fill="#6B6F76"/>
+  <rect x="600" y="404" width="106" height="10" rx="5" fill="#6B6F76"/>
+</svg>
