@@ -17,9 +17,12 @@ export type SmoothDocsConfig = {
   siteKey: string;
   siteName: string;
   devPort: number;
+  navIgnore: string[];
   generatedAllDir: string;
   theme: SmoothDocsTheme;
 };
+
+export const DEFAULT_NAV_IGNORE_PATTERNS: string[];
 
 export function loadSmoothDocsConfig(options?: {
   kitRoot?: string;

@@ -4,11 +4,13 @@
   "private": false,
   "type": "module",
   "bin": {
+    "smdocs": "bin/smooth-docs.mjs",
     "smooth-docs": "bin/smooth-docs.mjs"
   },
   "scripts": {
+    "smdocs": "node bin/smooth-docs.mjs",
     "smooth-docs": "node bin/smooth-docs.mjs",
-    "dev": "node bin/smooth-docs.mjs serve examples/basic",
+    "dev": "node bin/smooth-docs.mjs run examples/basic",
     "build": "node bin/smooth-docs.mjs build examples/basic",
     "generate": "SMOOTH_DOCS_PROJECT_DIR=examples/basic node scripts/generate-all-content.mjs",
     "typecheck": "tsc --noEmit"

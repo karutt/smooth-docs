@@ -24,6 +24,7 @@ const generatedDir = path.join(rootDir, ".generated", site);
 const publicDir = path.join(generatedDir, "public");
 
 const siteTitle = config.siteName;
+const navIgnorePatterns = expandDirectoryIgnorePatterns(config.navIgnore);
 const AUTONUMBER_PREFIX = "__beautiful_mermaid_autonumber_";
 const AUTONUMBER_PATTERN = /__beautiful_mermaid_autonumber_(\d+)__\s*/g;
 const TASK_LIST_MARKER = /^\s*\[([ xX])\]\s+/;
@@ -36,12 +37,14 @@ await fs.mkdir(publicDir, { recursive: true });
 const markdownFiles = await fg("**/*.md", {
   cwd: sourceDir,
   dot: false,
+  ignore: navIgnorePatterns,
   onlyFiles: true,
 });
 
 const directoryPaths = await fg("**", {
   cwd: sourceDir,
   dot: false,
+  ignore: navIgnorePatterns,
   onlyDirectories: true,
 });
 const directoryRouteSet = new Set(
@@ -132,6 +135,29 @@ const output = `import type { DocsData } from "../../src/types";\n\nexport const
 )};\n`;
 
 await fs.writeFile(path.join(generatedDir, "docs-data.ts"), output);
+
+function expandDirectoryIgnorePatterns(patterns) {
+  const expanded = new Set();
+
+  for (const pattern of patterns ?? []) {
+    const normalized = String(pattern).replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "");
+    if (!normalized) continue;
+
+    expanded.add(normalized);
+
+    if (normalized.endsWith("/**")) {
+      const directoryPattern = normalized.slice(0, -3).replace(/\/+$/, "");
+      if (directoryPattern) expanded.add(directoryPattern);
+      continue;
+    }
+
+    if (!/[?*[\]{}()!+@]/.test(normalized.split("/").at(-1) ?? "")) {
+      expanded.add(`${normalized}/**`);
+    }
+  }
+
+  return [...expanded];
+}
 
 async function collectAssetDimensions(relativePaths) {
   const dimensions = new Map();

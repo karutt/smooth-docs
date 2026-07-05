@@ -2,3 +2,9 @@ site_name: "Example Docs"
 site_key: docs
 docs_dir: docs
 theme: default
+nav:
+  ignore:
+    - "**/assets/**"
+    - "**/images/**"
+    - "**/media/**"
+    - "**/attachments/**"

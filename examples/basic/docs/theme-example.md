@@ -3,13 +3,13 @@
 Change the theme in `smooth-docs.yml`:
 
 ```yaml
-theme: compact
+theme: linear
 ```
 
-For a Linear-inspired theme:
+For a GitHub-inspired theme:
 
 ```yaml
-theme: linear
+theme: github
 ```
 
 Or point at a local theme directory:

@@ -19,15 +19,15 @@ pnpm link --global
 If you do not want a global command, run commands through the repository:
 
 ```bash
-pnpm smooth-docs -- help
+pnpm smdocs -- help
 ```
 
 ## Create Docs
 
 ```bash
-smooth-docs init /path/to/path-a-doc --title "Path A"
-smooth-docs init /path/to/path-b-doc --title "Path B" --theme compact
-smooth-docs init /path/to/path-c-doc --title "Path C"
+smdocs init /path/to/path-a-doc --title "Path A"
+smdocs init /path/to/path-b-doc --title "Path B" --theme linear
+smdocs init /path/to/path-c-doc --title "Path C"
 ```
 
 Each project gets:
@@ -35,19 +35,22 @@ Each project gets:
 ```text
 smooth-docs.yml
 docs/
+  assets/
+    linear-preview.svg
+  inbox/
   index.md
 ```
 
 Serve any project:
 
 ```bash
-smooth-docs serve /path/to/path-a-doc
+smdocs run /path/to/path-a-doc
 ```
 
 Build static output:
 
 ```bash
-smooth-docs build /path/to/path-a-doc
+smdocs build /path/to/path-a-doc
 ```
 
 The default output directory is `site/` inside the docs project.
@@ -59,12 +62,18 @@ site_name: "Path A"
 site_key: docs
 docs_dir: docs
 theme: default
+nav:
+  ignore:
+    - "**/assets/**"
+    - "**/images/**"
+    - "**/media/**"
+    - "**/attachments/**"
 ```
 
 Use a built-in theme:
 
 ```yaml
-theme: compact
+theme: linear
 ```
 
 Use a local theme directory:
@@ -87,9 +96,10 @@ themes/
     theme.css
     theme.js
     theme.yml
-  compact/
-    theme.yml
-    theme.css
+  dracula/
+  github/
+  linear/
+  raycast/
 ```
 
 Theme levels:
@@ -101,7 +111,7 @@ Theme levels:
 List available themes:
 
 ```bash
-smooth-docs themes
+smdocs themes
 ```
 
 ## Updating Common Code
@@ -117,7 +127,7 @@ pnpm install
 Then run:
 
 ```bash
-smooth-docs serve /path/to/path-a-doc
+smdocs run /path/to/path-a-doc
 ```
 
 If a dev server is already running from this kit, changes to `themes/` and the selected docs project's `docs/` directory trigger a reload.

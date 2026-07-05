@@ -14,7 +14,7 @@ Smooth Docs Kit is a MkDocs-style documentation renderer. This repository owns t
 
 ## Important Paths
 
-- `bin/smooth-docs.mjs`: CLI entrypoint for `init`, `serve`, `build`, and `themes`.
+- `bin/smooth-docs.mjs`: CLI entrypoint for `init`, `run`, `build`, and `themes`.
 - `scripts/config.mjs`: loads docs config and resolves theme inheritance/assets.
 - `scripts/generate-content.mjs`: converts Markdown and assets into generated docs data.
 - `scripts/generate-all-content.mjs`: combines per-site generated data and theme assets.
@@ -38,8 +38,8 @@ pnpm dev
 pnpm build
 pnpm generate
 pnpm typecheck
-pnpm smooth-docs -- help
-pnpm smooth-docs -- themes
+pnpm smdocs -- help
+pnpm smdocs -- themes
 ```
 
 - `pnpm dev` serves `examples/basic` through the CLI.

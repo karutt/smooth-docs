@@ -5,6 +5,12 @@ import YAML from "yaml";
 
 const defaultSiteKey = "docs";
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
+export const DEFAULT_NAV_IGNORE_PATTERNS = [
+  "**/assets/**",
+  "**/images/**",
+  "**/media/**",
+  "**/attachments/**",
+];
 
 export function loadSmoothDocsConfig(options = {}) {
   const kitRoot = path.resolve(options.kitRoot ?? path.resolve(currentDir, ".."));
@@ -19,6 +25,7 @@ export function loadSmoothDocsConfig(options = {}) {
   const devPort = normalizeDevPort(rawConfig.dev_port ?? rawConfig.devPort ?? rawConfig.port);
   const themeConfig = normalizeThemeConfig(rawConfig.theme);
   const theme = resolveTheme({ kitRoot, projectDir, themeConfig });
+  const navIgnore = normalizeNavIgnore(getRawNavIgnore(rawConfig));
 
   // Namespace the aggregated ".generated/all" output by site_key so that two
   // projects served from the same kit checkout can never overwrite each other's
@@ -33,6 +40,7 @@ export function loadSmoothDocsConfig(options = {}) {
     siteKey,
     siteName,
     devPort,
+    navIgnore,
     generatedAllDir,
     theme,
   };
@@ -111,6 +119,29 @@ function normalizeThemeConfig(theme) {
   if (typeof theme === "string") return { name: theme };
   if (typeof theme === "object") return theme;
   throw new Error("theme must be a string or object");
+}
+
+function getRawNavIgnore(rawConfig) {
+  if (rawConfig.nav && typeof rawConfig.nav === "object" && "ignore" in rawConfig.nav) {
+    return rawConfig.nav.ignore;
+  }
+
+  if ("nav_ignore" in rawConfig) return rawConfig.nav_ignore;
+  if ("navIgnore" in rawConfig) return rawConfig.navIgnore;
+  if ("ignore" in rawConfig) return rawConfig.ignore;
+
+  return DEFAULT_NAV_IGNORE_PATTERNS;
+}
+
+function normalizeNavIgnore(value) {
+  if (value === undefined || value === null || value === false) return [];
+  if (typeof value === "string") return [value.trim()].filter(Boolean);
+
+  if (Array.isArray(value)) {
+    return value.map((pattern) => String(pattern).trim()).filter(Boolean);
+  }
+
+  throw new Error("nav.ignore must be a string or array of strings");
 }
 
 function resolveTheme({ kitRoot, projectDir, themeConfig }) {
