@@ -577,6 +577,20 @@ export function App() {
         markPageAsRead(route.site, currentPage.url, setReadPageUrls);
     }, [currentPage.kind, currentPage.url, route.site]);
 
+    const markPagesRead = React.useCallback(
+        (pagePaths: ReadonlyArray<string>) => {
+            markPagesAsRead(route.site, pagePaths, setReadPageUrls);
+        },
+        [route.site],
+    );
+
+    const markPagesUnread = React.useCallback(
+        (pagePaths: ReadonlyArray<string>) => {
+            markPagesAsUnread(route.site, pagePaths, setReadPageUrls);
+        },
+        [route.site],
+    );
+
     React.useEffect(() => {
         const available = new Set(selectableSourcePaths);
 
@@ -1834,6 +1848,8 @@ export function App() {
                                         key={`${route.site}-${currentPage.url}-inbox`}
                                         getDragSourcePaths={getDragSourcePaths}
                                         onEntryContextMenu={openDocsEntryContextMenu}
+                                        onMarkRead={markPagesRead}
+                                        onMarkUnread={markPagesUnread}
                                         onNavigate={navigateTo}
                                         page={currentPage}
                                         readPageUrls={readPageUrls}
@@ -4295,18 +4311,25 @@ function MarkdownEditor({
 function InboxPage({
     getDragSourcePaths,
     onEntryContextMenu,
+    onMarkRead,
+    onMarkUnread,
     onNavigate,
     page,
     readPageUrls,
 }: {
     getDragSourcePaths: (sourcePath: string) => string[];
     onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
+    onMarkRead: (pagePaths: ReadonlyArray<string>) => void;
+    onMarkUnread: (pagePaths: ReadonlyArray<string>) => void;
     onNavigate: (url: string) => void;
     page: DocPage;
     readPageUrls: ReadonlySet<string>;
 }) {
     const items = page.inbox?.items ?? [];
     const [unreadOnly, setUnreadOnly] = React.useState(false);
+    const [selectedItemUrls, setSelectedItemUrls] = React.useState<ReadonlySet<string>>(
+        () => new Set<string>(),
+    );
     const sortedItems = React.useMemo(
         () =>
             [...items].sort((first, second) => {
@@ -4338,12 +4361,98 @@ function InboxPage({
                 : sortedItems,
         [readPageUrls, sortedItems, unreadOnly],
     );
+    const selectedItems = React.useMemo(
+        () => sortedItems.filter((item) => selectedItemUrls.has(item.url)),
+        [selectedItemUrls, sortedItems],
+    );
+    const selectedUnreadUrls = React.useMemo(
+        () => selectedItems.filter((item) => !readPageUrls.has(item.url)).map((item) => item.url),
+        [readPageUrls, selectedItems],
+    );
+    const selectedReadUrls = React.useMemo(
+        () => selectedItems.filter((item) => readPageUrls.has(item.url)).map((item) => item.url),
+        [readPageUrls, selectedItems],
+    );
+    const unreadUrls = React.useMemo(
+        () => sortedItems.filter((item) => !readPageUrls.has(item.url)).map((item) => item.url),
+        [readPageUrls, sortedItems],
+    );
+    const selectedDisplayCount = displayItems.reduce(
+        (count, item) => count + (selectedItemUrls.has(item.url) ? 1 : 0),
+        0,
+    );
+    const allDisplaySelected =
+        displayItems.length > 0 && selectedDisplayCount === displayItems.length;
     const relativeNow = useInboxRelativeTimeNow(displayItems);
+
+    React.useEffect(() => {
+        const availableUrls = new Set(items.map((item) => item.url));
+
+        setSelectedItemUrls((current) => {
+            const next = new Set([...current].filter((url) => availableUrls.has(url)));
+            return next.size === current.size ? current : next;
+        });
+    }, [items]);
+
+    const toggleItemSelection = React.useCallback((url: string, checked: boolean) => {
+        setSelectedItemUrls((current) => {
+            const next = new Set(current);
+            if (checked) {
+                next.add(url);
+            } else {
+                next.delete(url);
+            }
+            return next;
+        });
+    }, []);
+
+    const toggleVisibleSelection = React.useCallback(
+        (checked: boolean) => {
+            const visibleUrls = displayItems.map((item) => item.url);
+
+            setSelectedItemUrls((current) => {
+                const next = new Set(current);
+                for (const url of visibleUrls) {
+                    if (checked) {
+                        next.add(url);
+                    } else {
+                        next.delete(url);
+                    }
+                }
+                return next;
+            });
+        },
+        [displayItems],
+    );
+
+    const markSelectedRead = React.useCallback(() => {
+        if (selectedUnreadUrls.length === 0) return;
+
+        onMarkRead(selectedUnreadUrls);
+        setSelectedItemUrls(new Set<string>());
+        toast.success(`Marked ${formatInboxDocumentCount(selectedUnreadUrls.length)} as read.`);
+    }, [onMarkRead, selectedUnreadUrls]);
+
+    const markSelectedUnread = React.useCallback(() => {
+        if (selectedReadUrls.length === 0) return;
+
+        onMarkUnread(selectedReadUrls);
+        setSelectedItemUrls(new Set<string>());
+        toast.success(`Marked ${formatInboxDocumentCount(selectedReadUrls.length)} as unread.`);
+    }, [onMarkUnread, selectedReadUrls]);
+
+    const markAllRead = React.useCallback(() => {
+        if (unreadUrls.length === 0) return;
+
+        onMarkRead(unreadUrls);
+        setSelectedItemUrls(new Set<string>());
+        toast.success(`Marked ${formatInboxDocumentCount(unreadUrls.length)} as read.`);
+    }, [onMarkRead, unreadUrls]);
 
     return (
         <section className='mt-6 space-y-4'>
-            <div className='flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between'>
-                <div className='flex min-w-0 items-center gap-3'>
+            <div className='flex min-w-0 flex-col gap-3 xl:flex-row xl:items-center xl:justify-between'>
+                <div className='flex min-w-[12rem] items-center gap-3'>
                     <span className='flex h-10 w-10 shrink-0 items-center justify-center rounded-md border bg-muted text-muted-foreground'>
                         <Inbox className='h-5 w-5' />
                     </span>
@@ -4354,16 +4463,58 @@ function InboxPage({
                         </p>
                     </div>
                 </div>
-                <div className='flex shrink-0 items-center gap-2'>
+                <div className='flex min-w-0 flex-1 flex-wrap items-center gap-2 xl:justify-end'>
+                    <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        className='h-7 gap-1.5 px-2 text-xs'
+                        aria-label='Mark selected inbox documents as read'
+                        title='Mark selected inbox documents as read'
+                        disabled={selectedUnreadUrls.length === 0}
+                        onClick={markSelectedRead}>
+                        <CheckCircle2 className='h-3.5 w-3.5' />
+                        Read
+                    </Button>
+                    <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        className='h-7 gap-1.5 px-2 text-xs'
+                        aria-label='Mark selected inbox documents as unread'
+                        title='Mark selected inbox documents as unread'
+                        disabled={selectedReadUrls.length === 0}
+                        onClick={markSelectedUnread}>
+                        <Circle className='h-3.5 w-3.5' />
+                        Unread
+                    </Button>
+                    <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        className='h-7 gap-1.5 px-2 text-xs'
+                        aria-label='Mark all inbox documents as read'
+                        title='Mark all inbox documents as read'
+                        disabled={unreadCount === 0}
+                        onClick={markAllRead}>
+                        <CheckCircle2 className='h-3.5 w-3.5' />
+                        All read
+                    </Button>
                     <Toggle
                         pressed={unreadOnly}
                         disabled={unreadCount === 0}
                         className='h-7 gap-1.5 px-2 text-xs'
+                        title='Show unread inbox documents only'
                         aria-label='Show unread inbox documents only'
                         onPressedChange={setUnreadOnly}>
                         <Circle className='h-3.5 w-3.5 fill-primary text-primary' />
-                        Unread only
+                        Unread
                     </Toggle>
+                    {selectedItems.length > 0 && (
+                        <Badge variant='secondary' className='w-fit'>
+                            {selectedItems.length} selected
+                        </Badge>
+                    )}
                     <Badge variant={unreadCount > 0 ? "default" : "secondary"} className='w-fit'>
                         {unreadCount} unread
                     </Badge>
@@ -4371,11 +4522,28 @@ function InboxPage({
             </div>
 
             <div className='overflow-hidden rounded-md border bg-card'>
-                <Table>
+                <Table className='table-fixed'>
                     <TableHeader>
                         <TableRow>
+                            <TableHead className='w-10 pr-0'>
+                                <input
+                                    type='checkbox'
+                                    className='docs-inbox-select-checkbox'
+                                    aria-label='Select visible inbox documents'
+                                    checked={allDisplaySelected}
+                                    disabled={displayItems.length === 0}
+                                    ref={(element) => {
+                                        if (!element) return;
+                                        element.indeterminate =
+                                            selectedDisplayCount > 0 && !allDisplaySelected;
+                                    }}
+                                    onChange={(event) =>
+                                        toggleVisibleSelection(event.target.checked)
+                                    }
+                                />
+                            </TableHead>
                             <TableHead className='w-[92px]'>Status</TableHead>
-                            <TableHead>Document</TableHead>
+                            <TableHead className='min-w-0'>Document</TableHead>
                             <TableHead className='hidden w-28 md:table-cell'>Added</TableHead>
                             <TableHead className='hidden w-28 lg:table-cell'>Updated</TableHead>
                         </TableRow>
@@ -4384,7 +4552,7 @@ function InboxPage({
                         {displayItems.length === 0 ? (
                             <TableRow>
                                 <TableCell
-                                    colSpan={4}
+                                    colSpan={5}
                                     className='h-24 text-center text-sm text-muted-foreground'>
                                     {unreadOnly ? "No unread inbox documents" : "Empty inbox"}
                                 </TableCell>
@@ -4396,6 +4564,7 @@ function InboxPage({
                                 const updatedAt = formatInboxDate(item.updatedAt, relativeNow);
                                 const addedAtTitle = formatInboxAbsoluteDate(item.createdAt);
                                 const updatedAtTitle = formatInboxAbsoluteDate(item.updatedAt);
+                                const isSelected = selectedItemUrls.has(item.url);
 
                                 return (
                                     <TableRow
@@ -4403,7 +4572,10 @@ function InboxPage({
                                         draggable
                                         role='link'
                                         tabIndex={0}
-                                        className='cursor-pointer'
+                                        className={cn(
+                                            "cursor-pointer",
+                                            isSelected && "bg-muted/40 hover:bg-muted/50",
+                                        )}
                                         onClick={() => onNavigate(item.url)}
                                         onContextMenu={(event) =>
                                             onEntryContextMenu(event, {
@@ -4426,6 +4598,23 @@ function InboxPage({
                                             event.preventDefault();
                                             onNavigate(item.url);
                                         }}>
+                                        <TableCell className='pr-0'>
+                                            <input
+                                                type='checkbox'
+                                                className='docs-inbox-select-checkbox'
+                                                aria-label={`Select ${item.title}`}
+                                                checked={isSelected}
+                                                onClick={(event) => event.stopPropagation()}
+                                                onContextMenu={(event) => event.stopPropagation()}
+                                                onKeyDown={(event) => event.stopPropagation()}
+                                                onChange={(event) =>
+                                                    toggleItemSelection(
+                                                        item.url,
+                                                        event.target.checked,
+                                                    )
+                                                }
+                                            />
+                                        </TableCell>
                                         <TableCell>
                                             <span
                                                 className={cn(
@@ -4442,12 +4631,16 @@ function InboxPage({
                                                 {isRead ? "Read" : "Unread"}
                                             </span>
                                         </TableCell>
-                                        <TableCell>
-                                            <div className='group flex min-w-0 flex-col text-left'>
-                                                <span className='line-clamp-1 font-medium text-foreground group-hover:underline'>
+                                        <TableCell className='min-w-0 overflow-hidden'>
+                                            <div className='group flex min-w-0 max-w-full flex-col text-left'>
+                                                <span
+                                                    className='truncate font-medium text-foreground group-hover:underline'
+                                                    title={item.title}>
                                                     {item.title}
                                                 </span>
-                                                <span className='mt-1 line-clamp-1 max-w-2xl text-xs leading-5 text-muted-foreground'>
+                                                <span
+                                                    className='mt-1 truncate text-xs leading-5 text-muted-foreground'
+                                                    title={item.text || item.sourcePath}>
                                                     {item.text || item.sourcePath}
                                                 </span>
                                                 <span
@@ -4490,6 +4683,10 @@ function countUnreadInboxItems(
             0,
         ) ?? 0
     );
+}
+
+function formatInboxDocumentCount(count: number) {
+    return `${count} inbox ${count === 1 ? "document" : "documents"}`;
 }
 
 function FolderPage({
@@ -5758,13 +5955,52 @@ function markPageAsRead(
     pagePath: string,
     setReadPageUrls: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>,
 ) {
-    const normalizedPath = normalizePath(pagePath);
+    markPagesAsRead(site, [pagePath], setReadPageUrls);
+}
+
+function markPagesAsRead(
+    site: SiteKey,
+    pagePaths: ReadonlyArray<string>,
+    setReadPageUrls: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>,
+) {
+    const normalizedPaths = pagePaths.map(normalizePath);
 
     setReadPageUrls((current) => {
-        if (current.has(normalizedPath)) return current;
+        let changed = false;
 
         const next = new Set(current);
-        next.add(normalizedPath);
+        for (const pagePath of normalizedPaths) {
+            if (next.has(pagePath)) continue;
+
+            next.add(pagePath);
+            changed = true;
+        }
+
+        if (!changed) return current;
+
+        writeStorageValue(getReadPagesStorageKey(site), JSON.stringify([...next].sort()));
+        return next;
+    });
+}
+
+function markPagesAsUnread(
+    site: SiteKey,
+    pagePaths: ReadonlyArray<string>,
+    setReadPageUrls: React.Dispatch<React.SetStateAction<ReadonlySet<string>>>,
+) {
+    const normalizedPaths = pagePaths.map(normalizePath);
+
+    setReadPageUrls((current) => {
+        let changed = false;
+        const next = new Set(current);
+
+        for (const pagePath of normalizedPaths) {
+            if (!next.delete(pagePath)) continue;
+            changed = true;
+        }
+
+        if (!changed) return current;
+
         writeStorageValue(getReadPagesStorageKey(site), JSON.stringify([...next].sort()));
         return next;
     });
