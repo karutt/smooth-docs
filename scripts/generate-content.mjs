@@ -20,7 +20,7 @@ if (site !== config.siteKey) {
 
 const oppositeSite = site;
 const sourceDir = config.docsDir;
-const generatedDir = path.join(rootDir, ".generated", site);
+const generatedDir = config.generatedSiteDir;
 const publicDir = path.join(generatedDir, "public");
 
 const siteTitle = config.siteName;
@@ -113,6 +113,7 @@ if (pages.length === 0) {
   });
 }
 
+await addRootFolderPage(pages, directoryPaths);
 addInboxPages(pages);
 await addFolderPages(pages, directoryPaths);
 pages.sort(comparePages);
@@ -128,7 +129,7 @@ const docsData = {
   nav: buildNav(pages, directoryPaths),
 };
 
-const output = `import type { DocsData } from "../../src/types";\n\nexport const docsData: DocsData = ${JSON.stringify(
+const output = `import type { DocsData } from "#smooth-docs/types";\n\nexport const docsData: DocsData = ${JSON.stringify(
   docsData,
   null,
   2,
@@ -1151,6 +1152,55 @@ function addInboxPages(pageList) {
   pageList.push(inboxPage);
 }
 
+async function addRootFolderPage(pageList, directoryList) {
+  const sourcePages = pageList.filter((page) => page.kind === "page");
+  const absolutePath = sourceDir;
+  const stats = await fs.stat(absolutePath);
+  const directFolders = [...directoryList]
+    .sort((a, b) => a.localeCompare(b, "ja"))
+    .filter((directory) => path.posix.dirname(directory) === ".")
+    .map((directory) => ({
+      kind: "folder",
+      title: titleFromSegment(path.posix.basename(directory)),
+      url: toFolderRoute(directory),
+      folderPath: `${site}/docs/${directory}`,
+      absolutePath: path.join(sourceDir, directory),
+      text: "Folder",
+    }));
+  const directPages = sourcePages
+    .filter((page) => path.posix.dirname(page.relativePath) === ".")
+    .map((page) => ({
+      kind: "page",
+      title: page.title,
+      url: page.url,
+      sourcePath: page.sourcePath,
+      absolutePath: page.absolutePath,
+      text: page.text,
+      createdAt: page.createdAt,
+      updatedAt: page.updatedAt,
+    }));
+  const items = [...directFolders, ...directPages].sort(compareFolderItems);
+
+  pageList.push({
+    title: siteTitle,
+    url: toFolderRoute(""),
+    sourcePath: `${site}/docs/`,
+    absolutePath,
+    markdown: "",
+    html: renderFolderFallbackHtml("", items),
+    text: `${items.length} items`,
+    createdAt: toFileDate(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs),
+    updatedAt: toFileDate(stats.mtimeMs),
+    kind: "folder",
+    folder: {
+      root: "",
+      items,
+    },
+    order: -1,
+    relativePath: "",
+  });
+}
+
 async function addFolderPages(pageList, directoryList) {
   const sourcePages = pageList.filter((page) => page.kind === "page");
   const sortedDirectories = [...directoryList].sort((a, b) => a.localeCompare(b, "ja"));
@@ -1217,11 +1267,12 @@ function compareFolderItems(a, b) {
 }
 
 function renderFolderFallbackHtml(folderPath, items) {
+  const label = folderPath || "docs";
   const rows = items
     .map((item) => `<li><a href="${escapeAttribute(item.url)}">${escapeHtml(item.title)}</a></li>`)
     .join("");
 
-  return `<p>${escapeHtml(folderPath)} contains ${items.length} items.</p><ul>${rows}</ul>`;
+  return `<p>${escapeHtml(label)} contains ${items.length} items.</p><ul>${rows}</ul>`;
 }
 
 function compareInboxItems(a, b) {
@@ -1289,7 +1340,7 @@ function orderFromSegment(segment) {
 
 function toRoute(relativePath) {
   const normalized = relativePath.split(path.sep).join("/");
-  if (normalized === "index.md") return "/";
+  if (normalized === "index.md") return "/index/";
   const routePath = normalized.replace(/\.md$/, "");
   return directoryRouteSet.has(routePath) ? `/${normalized}/` : `/${routePath}/`;
 }

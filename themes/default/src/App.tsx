@@ -1761,10 +1761,21 @@ export function App() {
                                 ? "translate-y-0 opacity-100"
                                 : "-translate-y-full opacity-0",
                         )}>
-                        <div className='flex h-14 items-center gap-3 px-4 lg:px-6'>
+                        <div className='flex h-14 items-center gap-2 px-4 lg:gap-3 lg:px-6'>
                             <SidebarTrigger aria-label='Toggle navigation' />
+                            <HeaderBreadcrumbs
+                                breadcrumbs={pageBreadcrumbs}
+                                onNavigate={navigateTo}
+                                showBreadcrumbs={uiSettings.showBreadcrumbs}
+                            />
 
-                            <div className='ml-auto flex items-center gap-2'>
+                            <div className='ml-auto flex shrink-0 items-center gap-1.5'>
+                                <PageHeaderActions
+                                    canEditMarkdown={canEditMarkdown}
+                                    editMode={editMode}
+                                    onEditModeToggle={toggleEditMode}
+                                    page={currentPage}
+                                />
                                 <SiteToggle site={route.site} onSiteChange={switchSite} />
 
                                 <Button
@@ -1822,13 +1833,7 @@ export function App() {
                                 className='mx-auto flex w-full flex-col gap-0'
                                 style={{ maxWidth: "var(--docs-main-max-width)" }}>
                                 <PageHeader
-                                    breadcrumbs={pageBreadcrumbs}
-                                    canEditMarkdown={canEditMarkdown}
-                                    editMode={editMode}
-                                    onEditModeToggle={toggleEditMode}
-                                    onNavigate={navigateTo}
                                     page={currentPage}
-                                    showBreadcrumbs={uiSettings.showBreadcrumbs}
                                 />
                                 {editMode ? (
                                     <MarkdownEditor
@@ -4111,128 +4116,128 @@ function SettingSwitch({
 }
 
 function PageHeader({
-    breadcrumbs,
-    canEditMarkdown,
-    editMode,
-    onEditModeToggle,
-    onNavigate,
     page,
-    showBreadcrumbs,
 }: {
-    breadcrumbs: PageBreadcrumbItem[];
-    canEditMarkdown: boolean;
-    editMode: boolean;
-    onEditModeToggle: () => void;
-    onNavigate: (url: string) => void;
     page: DocPage;
-    showBreadcrumbs: boolean;
 }) {
     return (
         <div className='docs-page-header space-y-4'>
-            <div className='space-y-3'>
-                <div className='flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
-                    {showBreadcrumbs ? (
-                        <Breadcrumb className='min-w-0'>
-                            <BreadcrumbList className='min-w-0 flex-nowrap overflow-hidden'>
-                                {breadcrumbs.map((item, index) => {
-                                    const isLast = index === breadcrumbs.length - 1;
-
-                                    return (
-                                        <React.Fragment key={`${item.title}-${item.url ?? index}`}>
-                                            <BreadcrumbItem className='min-w-0'>
-                                                {isLast || !item.url ? (
-                                                    <BreadcrumbPage className='truncate'>
-                                                        {item.title}
-                                                    </BreadcrumbPage>
-                                                ) : (
-                                                    <BreadcrumbLink asChild className='truncate'>
-                                                        <button
-                                                            type='button'
-                                                            onClick={() => onNavigate(item.url!)}>
-                                                            {item.title}
-                                                        </button>
-                                                    </BreadcrumbLink>
-                                                )}
-                                            </BreadcrumbItem>
-                                            {!isLast && (
-                                                <BreadcrumbSeparator className='shrink-0' />
-                                            )}
-                                        </React.Fragment>
-                                    );
-                                })}
-                            </BreadcrumbList>
-                        </Breadcrumb>
-                    ) : (
-                        <div className='min-w-0' />
-                    )}
-
-                    <TooltipProvider delayDuration={300}>
-                        <div className='flex shrink-0 items-center gap-1.5'>
-                            {canEditMarkdown && (
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button
-                                            variant={editMode ? "default" : "outline"}
-                                            size='icon'
-                                            className='h-7 w-7'
-                                            aria-label={editMode ? "View Markdown" : "Edit Markdown"}
-                                            onClick={onEditModeToggle}>
-                                            {editMode ? (
-                                                <Eye className='h-3.5 w-3.5' />
-                                            ) : (
-                                                <PencilLine className='h-3.5 w-3.5' />
-                                            )}
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent side='bottom'>
-                                        {editMode ? "View" : "Edit"}
-                                    </TooltipContent>
-                                </Tooltip>
-                            )}
-                            <DropdownMenu>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button
-                                                variant='outline'
-                                                size='icon'
-                                                className='h-7 w-7'
-                                                aria-label='Copy page data'>
-                                                <Copy className='h-3.5 w-3.5' />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                    </TooltipTrigger>
-                                    <TooltipContent side='bottom'>Copy</TooltipContent>
-                                </Tooltip>
-                                <DropdownMenuContent align='end' className='w-36'>
-                                    <DropdownMenuItem
-                                        onSelect={() => {
-                                            void copyWithToast(
-                                                page.markdown,
-                                                "Copied page Markdown.",
-                                            );
-                                        }}>
-                                        <FileText className='h-3.5 w-3.5 text-muted-foreground' />
-                                        Markdown
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem
-                                        onSelect={() => {
-                                            void copyWithToast(page.absolutePath, "Copied page path.");
-                                        }}>
-                                        <Folder className='h-3.5 w-3.5 text-muted-foreground' />
-                                        Path
-                                    </DropdownMenuItem>
-                                </DropdownMenuContent>
-                            </DropdownMenu>
-                        </div>
-                    </TooltipProvider>
-                </div>
-                <h1 className='docs-page-title break-words text-2xl font-semibold tracking-normal md:text-3xl'>
-                    {page.title}
-                </h1>
-            </div>
+            <h1 className='docs-page-title break-words text-2xl font-semibold tracking-normal md:text-3xl'>
+                {page.title}
+            </h1>
             <Separator />
         </div>
+    );
+}
+
+function HeaderBreadcrumbs({
+    breadcrumbs,
+    onNavigate,
+    showBreadcrumbs,
+}: {
+    breadcrumbs: PageBreadcrumbItem[];
+    onNavigate: (url: string) => void;
+    showBreadcrumbs: boolean;
+}) {
+    if (!showBreadcrumbs) return <div className='min-w-0 flex-1' />;
+
+    return (
+        <Breadcrumb className='min-w-0 flex-1'>
+            <BreadcrumbList className='min-w-0 flex-nowrap overflow-hidden'>
+                {breadcrumbs.map((item, index) => {
+                    const isLast = index === breadcrumbs.length - 1;
+
+                    return (
+                        <React.Fragment key={`${item.title}-${item.url ?? index}`}>
+                            <BreadcrumbItem className='min-w-0'>
+                                {isLast || !item.url ? (
+                                    <BreadcrumbPage className='truncate'>
+                                        {item.title}
+                                    </BreadcrumbPage>
+                                ) : (
+                                    <BreadcrumbLink asChild className='truncate'>
+                                        <button type='button' onClick={() => onNavigate(item.url!)}>
+                                            {item.title}
+                                        </button>
+                                    </BreadcrumbLink>
+                                )}
+                            </BreadcrumbItem>
+                            {!isLast && <BreadcrumbSeparator className='shrink-0' />}
+                        </React.Fragment>
+                    );
+                })}
+            </BreadcrumbList>
+        </Breadcrumb>
+    );
+}
+
+function PageHeaderActions({
+    canEditMarkdown,
+    editMode,
+    onEditModeToggle,
+    page,
+}: {
+    canEditMarkdown: boolean;
+    editMode: boolean;
+    onEditModeToggle: () => void;
+    page: DocPage;
+}) {
+    return (
+        <TooltipProvider delayDuration={300}>
+            <div className='flex shrink-0 items-center gap-1.5'>
+                {canEditMarkdown && (
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <Button
+                                variant={editMode ? "default" : "outline"}
+                                size='icon'
+                                className='h-7 w-7'
+                                aria-label={editMode ? "View Markdown" : "Edit Markdown"}
+                                onClick={onEditModeToggle}>
+                                {editMode ? (
+                                    <Eye className='h-3.5 w-3.5' />
+                                ) : (
+                                    <PencilLine className='h-3.5 w-3.5' />
+                                )}
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent side='bottom'>{editMode ? "View" : "Edit"}</TooltipContent>
+                    </Tooltip>
+                )}
+                <DropdownMenu>
+                    <Tooltip>
+                        <TooltipTrigger asChild>
+                            <DropdownMenuTrigger asChild>
+                                <Button
+                                    variant='outline'
+                                    size='icon'
+                                    className='h-7 w-7'
+                                    aria-label='Copy page data'>
+                                    <Copy className='h-3.5 w-3.5' />
+                                </Button>
+                            </DropdownMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent side='bottom'>Copy</TooltipContent>
+                    </Tooltip>
+                    <DropdownMenuContent align='end' className='w-36'>
+                        <DropdownMenuItem
+                            onSelect={() => {
+                                void copyWithToast(page.markdown, "Copied page Markdown.");
+                            }}>
+                            <FileText className='h-3.5 w-3.5 text-muted-foreground' />
+                            Markdown
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                            onSelect={() => {
+                                void copyWithToast(page.absolutePath, "Copied page path.");
+                            }}>
+                            <Folder className='h-3.5 w-3.5 text-muted-foreground' />
+                            Path
+                        </DropdownMenuItem>
+                    </DropdownMenuContent>
+                </DropdownMenu>
+            </div>
+        </TooltipProvider>
     );
 }
 
@@ -4721,6 +4726,39 @@ function FolderPage({
     const fileCount = items.length - folderCount;
     const relativeNow = useFolderRelativeTimeNow(items);
     const [dropTarget, setDropTarget] = React.useState<string | null>(null);
+    const isRootFolder = folderPath === "";
+    const isCurrentFolderDropTarget = dropTarget === folderPath;
+    const handleCurrentFolderDragOver = React.useCallback(
+        (event: React.DragEvent) => {
+            if (!isRootFolder || !event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            event.dataTransfer.dropEffect = "move";
+            setDropTarget(folderPath);
+        },
+        [folderPath, isRootFolder],
+    );
+    const handleCurrentFolderDragLeave = React.useCallback((event: React.DragEvent) => {
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+
+        setDropTarget(null);
+    }, []);
+    const handleCurrentFolderDrop = React.useCallback(
+        (event: React.DragEvent) => {
+            if (!isRootFolder) return;
+
+            const sourcePaths = readDraggedSourcePaths(event);
+            if (sourcePaths.length === 0) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            setDropTarget(null);
+            onMoveMarkdown(sourcePaths, folderPath);
+        },
+        [folderPath, isRootFolder, onMoveMarkdown],
+    );
 
     return (
         <section className='mt-6 space-y-4'>
@@ -4775,7 +4813,14 @@ function FolderPage({
                 </div>
             </div>
 
-            <div className='overflow-hidden rounded-md border bg-card'>
+            <div
+                className={cn(
+                    "overflow-hidden rounded-md border bg-card transition-[background,box-shadow]",
+                    isCurrentFolderDropTarget && "bg-muted/40 ring-2 ring-ring",
+                )}
+                onDragLeave={handleCurrentFolderDragLeave}
+                onDragOver={handleCurrentFolderDragOver}
+                onDrop={handleCurrentFolderDrop}>
                 <Table>
                     <TableHeader>
                         <TableRow>
@@ -5753,6 +5798,10 @@ function extractTableOfContents(html: string): TableOfContentsItem[] {
 }
 
 function buildPageBreadcrumbs(site: SiteKey, nav: NavItem[], page: DocPage): PageBreadcrumbItem[] {
+    if (page.kind === "folder" && page.folder?.root === "") {
+        return [{ title: site }];
+    }
+
     const navPath = findNavPath(nav, page.url);
     const pagePath =
         navPath.length > 0
@@ -6606,16 +6655,47 @@ function DocsSidebar({
     width: number;
     wrapText: boolean;
 }) {
+    const [isRootDropTarget, setIsRootDropTarget] = React.useState(false);
+    const rootTarget = React.useMemo<DocsEntryTarget>(
+        () => ({
+            title: siteTitle,
+            kind: "root",
+            url: "/",
+            folderPath: "",
+        }),
+        [siteTitle],
+    );
     const openRootContextMenu = React.useCallback(
         (event: React.MouseEvent) => {
-            onEntryContextMenu(event, {
-                title: "Docs",
-                kind: "root",
-                url: "/",
-                folderPath: "",
-            });
+            onEntryContextMenu(event, rootTarget);
         },
-        [onEntryContextMenu],
+        [onEntryContextMenu, rootTarget],
+    );
+    const handleRootDragOver = React.useCallback((event: React.DragEvent) => {
+        if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setIsRootDropTarget(true);
+    }, []);
+    const handleRootDragLeave = React.useCallback((event: React.DragEvent) => {
+        const relatedTarget = event.relatedTarget;
+        if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
+
+        setIsRootDropTarget(false);
+    }, []);
+    const handleRootDrop = React.useCallback(
+        (event: React.DragEvent) => {
+            const sourcePaths = readDraggedSourcePaths(event);
+            if (sourcePaths.length === 0) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+            setIsRootDropTarget(false);
+            onMoveMarkdown(sourcePaths, "");
+        },
+        [onMoveMarkdown],
     );
 
     return (
@@ -6667,13 +6747,34 @@ function DocsSidebar({
                         />
                     </SidebarGroupContent>
                 </SidebarGroup>
+                <button
+                    type='button'
+                    aria-label='Open root folder'
+                    className={cn(
+                        "mt-1 block min-h-12 w-full flex-1 rounded-md outline-none transition-colors focus-visible:ring-2 focus-visible:ring-sidebar-ring",
+                        isRootDropTarget &&
+                            "bg-sidebar-accent text-sidebar-accent-foreground ring-2 ring-sidebar-ring",
+                    )}
+                    onClick={() => onNavigate("/")}
+                    onContextMenu={openRootContextMenu}
+                    onDragLeave={handleRootDragLeave}
+                    onDragOver={handleRootDragOver}
+                    onDrop={handleRootDrop}
+                />
             </SidebarContent>
             <SidebarFooter>
                 <SidebarMenu>
                     <SidebarMenuItem className='flex min-w-0 items-center gap-1'>
                         <SidebarMenuButton
-                            className='h-auto min-w-0 flex-1 py-2'
-                            onClick={() => onNavigate("/")}>
+                            className={cn(
+                                "h-auto min-w-0 flex-1 py-2",
+                                isRootDropTarget &&
+                                    "bg-sidebar-accent text-sidebar-accent-foreground ring-2 ring-sidebar-ring",
+                            )}
+                            onClick={() => onNavigate("/")}
+                            onDragLeave={handleRootDragLeave}
+                            onDragOver={handleRootDragOver}
+                            onDrop={handleRootDrop}>
                             <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground'>
                                 S
                             </span>

@@ -18,6 +18,7 @@ export type SmoothDocsConfig = {
   siteName: string;
   devPort: number;
   navIgnore: string[];
+  generatedSiteDir: string;
   generatedAllDir: string;
   theme: SmoothDocsTheme;
 };

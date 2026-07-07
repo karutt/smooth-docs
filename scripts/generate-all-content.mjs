@@ -27,7 +27,7 @@ for (const site of requestedSites) {
 const docsDataBySite = {};
 
 for (const site of requestedSites) {
-  const generatedPath = path.join(rootDir, ".generated", site, "docs-data.ts");
+  const generatedPath = path.join(config.generatedSiteDir, "docs-data.ts");
   const generated = await fs.readFile(generatedPath, "utf8");
   const jsonMatch = generated.match(/export const docsData: DocsData = ([\s\S]*);\n$/);
 
@@ -44,7 +44,7 @@ await fs.mkdir(allPublicDir, { recursive: true });
 await fs.mkdir(themePublicDir, { recursive: true });
 
 for (const site of requestedSites) {
-  const sitePublicDir = path.join(rootDir, ".generated", site, "public", "docs-assets");
+  const sitePublicDir = path.join(config.generatedSiteDir, "public", "docs-assets");
   const targetDir = path.join(allPublicDir, site);
   await fs.mkdir(targetDir, { recursive: true });
   try {
@@ -56,7 +56,7 @@ for (const site of requestedSites) {
 
 await copyThemeAssets(themePublicDir);
 
-const output = `import type { DocsData, SiteKey } from "../../src/types";\n\nexport const docsDataBySite: Record<SiteKey, DocsData> = ${JSON.stringify(
+const output = `import type { DocsData, SiteKey } from "#smooth-docs/types";\n\nexport const docsDataBySite: Record<SiteKey, DocsData> = ${JSON.stringify(
   docsDataBySite,
   null,
   2,

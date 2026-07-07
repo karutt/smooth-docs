@@ -206,6 +206,14 @@ function docsContentPlugin(): Plugin {
       server.watcher.on("unlink", regenerate);
 
       server.middlewares.use((req, res, next) => {
+        void serveGeneratedPublicFile(req, res)
+          .then((served) => {
+            if (!served) next();
+          })
+          .catch(next);
+      });
+
+      server.middlewares.use((req, res, next) => {
         if (!req.url?.startsWith("/__smooth-docs/")) {
           next();
           return;
@@ -221,6 +229,52 @@ function docsContentPlugin(): Plugin {
       });
     },
   };
+}
+
+async function serveGeneratedPublicFile(req: IncomingMessage, res: ServerResponse) {
+  const url = new URL(req.url ?? "/", "http://localhost");
+  const relativePath = generatedPublicRelativePath(url.pathname);
+  if (!relativePath) return false;
+
+  const publicRoot = path.join(docsConfig.generatedAllDir, "public");
+  const filePath = safeJoin(publicRoot, relativePath);
+
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile()) {
+      sendPlainText(res, 404, "Generated asset not found");
+      return true;
+    }
+
+    const body = await fs.readFile(filePath);
+    res.statusCode = 200;
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Content-Type", contentTypeForPath(filePath));
+    res.setHeader("Content-Length", String(body.byteLength));
+    res.end(body);
+    return true;
+  } catch (error) {
+    if (isNodeError(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+      sendPlainText(res, 404, "Generated asset not found");
+      return true;
+    }
+    throw error;
+  }
+}
+
+function generatedPublicRelativePath(pathname: string) {
+  const decodedPathname = decodeUrlPathname(pathname);
+  if (decodedPathname.startsWith("/theme/")) return decodedPathname.slice(1);
+  if (decodedPathname.startsWith("/docs-assets/")) return decodedPathname.slice(1);
+  return "";
+}
+
+function decodeUrlPathname(pathname: string) {
+  try {
+    return decodeURIComponent(pathname);
+  } catch {
+    throw new Error(`Invalid URL path: ${pathname}`);
+  }
 }
 
 async function handleDocsActionRequest(
@@ -1185,13 +1239,11 @@ function safeJoin(root: string, relativePath: string) {
 }
 
 function toRoute(relativePath: string) {
-  if (relativePath === "index.md") return "/";
+  if (relativePath === "index.md") return "/index/";
   return `/${relativePath.replace(/\.md$/, "")}/`;
 }
 
 async function toMarkdownRoute(root: string, relativePath: string) {
-  if (relativePath === "index.md") return "/";
-
   const normalized = relativePath.replace(/\\/g, "/");
   const routePath = normalized.replace(/\.md$/, "");
   const directoryPath = safeJoin(root, routePath);
@@ -1237,6 +1289,40 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status;
   res.setHeader("Content-Type", "application/json; charset=utf-8");
   res.end(JSON.stringify(body));
+}
+
+function sendPlainText(res: ServerResponse, status: number, body: string) {
+  res.statusCode = status;
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.end(body);
+}
+
+function contentTypeForPath(filePath: string) {
+  switch (path.extname(filePath).toLowerCase()) {
+    case ".css":
+      return "text/css; charset=utf-8";
+    case ".js":
+      return "text/javascript; charset=utf-8";
+    case ".json":
+      return "application/json; charset=utf-8";
+    case ".svg":
+      return "image/svg+xml";
+    case ".png":
+      return "image/png";
+    case ".jpg":
+    case ".jpeg":
+      return "image/jpeg";
+    case ".gif":
+      return "image/gif";
+    case ".webp":
+      return "image/webp";
+    case ".woff":
+      return "font/woff";
+    case ".woff2":
+      return "font/woff2";
+    default:
+      return "application/octet-stream";
+  }
 }
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {

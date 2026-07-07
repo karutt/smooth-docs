@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import YAML from "yaml";
@@ -22,15 +23,23 @@ export function loadSmoothDocsConfig(options = {}) {
   const docsDir = path.resolve(projectDir, rawConfig.docs_dir ?? rawConfig.docsDir ?? "docs");
   const siteKey = normalizeSiteKey(rawConfig.site_key ?? rawConfig.siteKey ?? defaultSiteKey);
   const siteName = String(rawConfig.site_name ?? rawConfig.siteName ?? path.basename(projectDir));
-  const devPort = normalizeDevPort(rawConfig.dev_port ?? rawConfig.devPort ?? rawConfig.port);
+  const devPort = normalizeDevPort(
+    rawConfig.dev_port ??
+      rawConfig.devPort ??
+      rawConfig.docs_port ??
+      rawConfig.docsPort ??
+      rawConfig.port,
+  );
   const themeConfig = normalizeThemeConfig(rawConfig.theme);
   const theme = resolveTheme({ kitRoot, projectDir, themeConfig });
   const navIgnore = normalizeNavIgnore(getRawNavIgnore(rawConfig));
 
-  // Namespace the aggregated ".generated/all" output by site_key so that two
-  // projects served from the same kit checkout can never overwrite each other's
-  // generated content (they resolve to distinct directories).
-  const generatedAllDir = path.join(kitRoot, ".generated", "all", siteKey);
+  // Namespace generated files by project directory so separate docs projects
+  // with the same site_key can be served from one kit checkout at the same time.
+  const generatedProjectKey = createGeneratedProjectKey(projectDir);
+  const generatedProjectDir = path.join(kitRoot, ".generated", "projects", generatedProjectKey);
+  const generatedSiteDir = path.join(generatedProjectDir, siteKey);
+  const generatedAllDir = path.join(generatedProjectDir, "all", siteKey);
 
   return {
     kitRoot,
@@ -41,6 +50,7 @@ export function loadSmoothDocsConfig(options = {}) {
     siteName,
     devPort,
     navIgnore,
+    generatedSiteDir,
     generatedAllDir,
     theme,
   };
@@ -218,6 +228,21 @@ function normalizeSiteKey(value) {
   }
 
   return siteKey;
+}
+
+function createGeneratedProjectKey(projectDir) {
+  const slug = toGeneratedPathSegment(path.basename(projectDir)) || "project";
+  const hash = crypto.createHash("sha1").update(projectDir).digest("hex").slice(0, 10);
+  return `${slug}-${hash}`;
+}
+
+function toGeneratedPathSegment(value) {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 48);
 }
 
 function titleCase(value) {
