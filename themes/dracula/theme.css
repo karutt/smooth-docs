@@ -616,6 +616,14 @@ html .docs-prose table {
     font-size: var(--dracula-font-size-code);
 }
 
+html .docs-prose .not-prose:has(> table) {
+    margin-block: 1em;
+}
+
+html .docs-prose .not-prose:has(> table) > table {
+    margin: 0;
+}
+
 html .docs-prose thead {
     border-color: var(--dracula-bg-tertiary);
     background: var(--dracula-bg-secondary);

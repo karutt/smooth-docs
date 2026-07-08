@@ -1,6 +1,8 @@
 import path from "node:path";
-import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import * as readline from "node:readline";
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -35,6 +37,86 @@ type DocsThemeOption = {
   extends?: string;
   requiresRestart: boolean;
 };
+
+type CodexJsonRpcMessage = {
+  id?: number;
+  method?: string;
+  params?: Record<string, unknown>;
+  result?: Record<string, unknown>;
+  error?: {
+    code?: number;
+    message?: string;
+  };
+};
+
+type CodexChatEvent =
+  | { type: "status"; status: CodexChatStatus }
+  | { type: "delta"; text: string }
+  | { type: "done"; status: CodexChatStatus }
+  | { type: "error"; message: string; status: CodexChatStatus };
+
+type CodexChatStatus = {
+  available: boolean;
+  running: boolean;
+  threadId: string | null;
+  lastError: string;
+  selectedEffort: string | null;
+  selectedModel: string | null;
+};
+
+type CodexChatRole = "assistant" | "system" | "user";
+
+type CodexChatHistoryMessage = {
+  id: string;
+  role: CodexChatRole;
+  content: string;
+};
+
+type CodexSessionResumeResult = {
+  status: CodexChatStatus;
+  messages: CodexChatHistoryMessage[];
+};
+
+type CodexChatMessageRequest = {
+  text: string;
+  contextBlocks?: Array<{
+    label?: string;
+    markdown?: string;
+    sourcePath?: string;
+  }>;
+  page?: {
+    title?: string;
+    url?: string;
+    sourcePath?: string;
+    site?: string;
+  };
+  selection?: string;
+};
+
+type CodexModelOption = {
+  id: string;
+  model: string;
+  displayName: string;
+  description: string;
+  defaultEffort: string | null;
+  effortOptions: Array<{
+    value: string;
+    description: string;
+  }>;
+  isDefault: boolean;
+};
+
+type CodexSessionSummary = {
+  id: string;
+  name: string;
+  preview: string;
+  cwd: string;
+  modelProvider: string;
+  updatedAt: number;
+  status: string;
+};
+
+const CODEX_SESSION_SOURCE_KINDS = ["appServer", "cli", "vscode", "exec", "unknown"];
 
 function selectedSites(): DocsSite[] {
   const rawSites = process.env.SMOOTH_DOCS_SITES ?? "";
@@ -277,6 +359,688 @@ function decodeUrlPathname(pathname: string) {
   }
 }
 
+class CodexChatBridge {
+  private activeTurnId: string | null = null;
+  private child: ChildProcessWithoutNullStreams | null = null;
+  private events = new EventEmitter();
+  private initialized = false;
+  private lastError = "";
+  private selectedEffort: string | null = null;
+  private selectedModel: string | null = null;
+  private nextRequestId = 1;
+  private pendingRequests = new Map<
+    number,
+    {
+      reject: (error: Error) => void;
+      resolve: (value: Record<string, unknown>) => void;
+      timer: NodeJS.Timeout;
+    }
+  >();
+  private startPromise: Promise<void> | null = null;
+  private stderrTail = "";
+  private suppressNextCloseError = false;
+  private threadId: string | null = null;
+
+  constructor(
+    private options: {
+      cwd: string;
+      serviceName: string;
+    },
+  ) {}
+
+  getStatus(): CodexChatStatus {
+    return {
+      available: this.child !== null || !this.lastError,
+      running: this.activeTurnId !== null,
+      threadId: this.threadId,
+      lastError: this.lastError,
+      selectedEffort: this.selectedEffort,
+      selectedModel: this.selectedModel,
+    };
+  }
+
+  onEvent(listener: (event: CodexChatEvent) => void) {
+    this.events.on("event", listener);
+    return () => this.events.off("event", listener);
+  }
+
+  async sendMessage(request: CodexChatMessageRequest) {
+    const text = request.text.trim();
+    if (!text) {
+      throw new Error("Message is required");
+    }
+
+    if (this.activeTurnId) {
+      throw new Error("Codex is still working on the previous message");
+    }
+
+    await this.ensureReady();
+
+    if (!this.threadId) {
+      throw new Error("Codex thread is not ready");
+    }
+
+    const params: Record<string, unknown> = {
+      threadId: this.threadId,
+      input: [
+        {
+          type: "text",
+          text: buildCodexChatPrompt(request),
+        },
+      ],
+    };
+
+    if (this.selectedModel) {
+      params.model = this.selectedModel;
+    }
+
+    if (this.selectedEffort) {
+      params.effort = this.selectedEffort;
+    }
+
+    const result = await this.sendRequest("turn/start", params);
+
+    const turn = getObject(result.turn);
+    this.activeTurnId = getString(turn?.id) ?? this.activeTurnId;
+    this.broadcast({ type: "status", status: this.getStatus() });
+    return { threadId: this.threadId, turnId: this.activeTurnId };
+  }
+
+  async resetThread() {
+    this.threadId = null;
+    this.activeTurnId = null;
+    this.lastError = "";
+    await this.ensureReady();
+    this.broadcast({ type: "status", status: this.getStatus() });
+  }
+
+  async configure(settings: { effort?: string | null; model?: string | null }) {
+    if ("model" in settings) {
+      this.selectedModel = normalizeOptionalString(settings.model);
+    }
+
+    if ("effort" in settings) {
+      this.selectedEffort = normalizeOptionalString(settings.effort);
+    }
+
+    this.broadcast({ type: "status", status: this.getStatus() });
+    return this.getStatus();
+  }
+
+  async listModels(): Promise<CodexModelOption[]> {
+    await this.ensureInitialized();
+
+    const result = await this.sendRequest("model/list", {
+      includeHidden: false,
+      limit: 100,
+    });
+    const data = Array.isArray(result.data) ? result.data : [];
+    const models = data.map(normalizeCodexModelOption).filter(Boolean) as CodexModelOption[];
+
+    if (!this.selectedModel) {
+      const defaultModel = models.find((model) => model.isDefault) ?? models[0];
+      this.selectedModel = defaultModel?.model ?? null;
+      this.selectedEffort = this.selectedEffort ?? defaultModel?.defaultEffort ?? null;
+      this.broadcast({ type: "status", status: this.getStatus() });
+    }
+
+    return models;
+  }
+
+  async listSessions(): Promise<CodexSessionSummary[]> {
+    await this.ensureInitialized();
+
+    const result = await this.sendRequest("thread/list", {
+      archived: false,
+      limit: 100,
+      sourceKinds: CODEX_SESSION_SOURCE_KINDS,
+      sortDirection: "desc",
+      sortKey: "recency_at",
+    });
+    const data = Array.isArray(result.data) ? result.data : [];
+    return data
+      .filter((thread) => isSmoothDocsCodexSession(thread, this.options.cwd))
+      .map(normalizeCodexSessionSummary)
+      .filter(Boolean) as CodexSessionSummary[];
+  }
+
+  async resumeThread(threadId: string): Promise<CodexSessionResumeResult> {
+    if (!threadId) {
+      throw new Error("Thread id is required");
+    }
+
+    if (this.activeTurnId) {
+      throw new Error("Stop the active turn before switching sessions");
+    }
+
+    await this.ensureInitialized();
+
+    const params: Record<string, unknown> = { threadId };
+    if (this.selectedModel) params.model = this.selectedModel;
+
+    const result = await this.sendRequest("thread/resume", params);
+    const thread = getObject(result.thread);
+    this.threadId = getString(thread?.id) ?? threadId;
+    this.selectedModel = getString(result.model) ?? this.selectedModel;
+    this.selectedEffort = getString(result.reasoningEffort) ?? this.selectedEffort;
+    this.activeTurnId = null;
+    this.lastError = "";
+    const messages = await this.readThreadMessages(this.threadId, thread);
+    this.broadcast({ type: "status", status: this.getStatus() });
+    return {
+      status: this.getStatus(),
+      messages,
+    };
+  }
+
+  async stopActiveTurn() {
+    if (!this.threadId || !this.activeTurnId) {
+      return this.getStatus();
+    }
+
+    const turnId = this.activeTurnId;
+
+    try {
+      await this.sendRequest("turn/interrupt", {
+        threadId: this.threadId,
+        turnId,
+      });
+    } catch (error) {
+      this.child?.kill("SIGTERM");
+      this.lastError = error instanceof Error ? error.message : "Failed to stop Codex";
+    } finally {
+      this.activeTurnId = null;
+      this.broadcast({ type: "status", status: this.getStatus() });
+    }
+
+    return this.getStatus();
+  }
+
+  private async ensureReady() {
+    await this.ensureInitialized();
+
+    if (this.threadId) return;
+
+    if (!this.startPromise) {
+      this.startPromise = this.startThread().finally(() => {
+        this.startPromise = null;
+      });
+    }
+
+    await this.startPromise;
+  }
+
+  private async ensureInitialized() {
+    if (this.child && this.initialized) return;
+
+    if (!this.startPromise) {
+      this.startPromise = this.start().finally(() => {
+        this.startPromise = null;
+      });
+    }
+
+    await this.startPromise;
+  }
+
+  private async start() {
+    if (!this.child) {
+      this.spawnAppServer();
+    }
+
+    if (!this.initialized) {
+      await this.sendRequest("initialize", {
+        clientInfo: {
+          name: "smooth_docs_kit",
+          title: "Smooth Docs Kit",
+          version: "0.1.0",
+        },
+      });
+      this.sendNotification("initialized", {});
+      this.initialized = true;
+    }
+  }
+
+  private async startThread() {
+    if (!this.threadId) {
+      const params: Record<string, unknown> = {
+        cwd: this.options.cwd,
+        serviceName: this.options.serviceName,
+      };
+
+      if (this.selectedModel) {
+        params.model = this.selectedModel;
+      }
+
+      const result = await this.sendRequest("thread/start", params);
+      const thread = getObject(result.thread);
+      this.threadId = getString(thread?.id) ?? null;
+      this.selectedModel = getString(result.model) ?? this.selectedModel;
+      if (!this.threadId) {
+        throw new Error("Codex did not return a thread id");
+      }
+    }
+
+    this.lastError = "";
+    this.broadcast({ type: "status", status: this.getStatus() });
+  }
+
+  private async readThreadMessages(threadId: string, thread: Record<string, unknown> | null) {
+    const resumedMessages = extractCodexThreadMessages(thread, threadId);
+    if (resumedMessages.length > 0) return resumedMessages;
+
+    try {
+      const result = await this.sendRequest("thread/read", {
+        threadId,
+        includeTurns: true,
+      });
+      return extractCodexThreadMessages(getObject(result.thread), threadId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to read session history";
+      return [
+        {
+          id: `${threadId}:history-error`,
+          role: "system" as const,
+          content: `Failed to read session history: ${message}`,
+        },
+      ];
+    }
+  }
+
+  private spawnAppServer() {
+    const command = resolveCodexCommand();
+    if (!command) {
+      const message =
+        "Could not find the Codex CLI. Set SMOOTH_DOCS_CODEX_BIN to the absolute path of the codex executable.";
+      this.lastError = message;
+      this.broadcast({ type: "error", message, status: this.getStatus() });
+      throw new Error(message);
+    }
+
+    this.lastError = "";
+    this.stderrTail = "";
+    this.suppressNextCloseError = false;
+    this.child = spawn(command, ["app-server"], {
+      cwd: this.options.cwd,
+      env: getCodexProcessEnv(command),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    const stdout = readline.createInterface({ input: this.child.stdout });
+    stdout.on("line", (line) => this.handleLine(line));
+
+    this.child.stderr.on("data", (chunk: Buffer) => {
+      this.stderrTail = `${this.stderrTail}${chunk.toString("utf8")}`.slice(-4000);
+    });
+
+    this.child.on("error", (error) => {
+      this.child = null;
+      this.initialized = false;
+      this.threadId = null;
+      this.activeTurnId = null;
+      this.suppressNextCloseError = true;
+      this.failAll(error);
+      this.lastError = error.message;
+      this.broadcast({ type: "error", message: error.message, status: this.getStatus() });
+    });
+
+    this.child.on("close", (code, signal) => {
+      if (this.suppressNextCloseError) {
+        this.suppressNextCloseError = false;
+        return;
+      }
+
+      const detail = this.stderrTail.trim();
+      const message = detail
+        ? `Codex app-server exited (${code ?? signal}): ${detail}`
+        : `Codex app-server exited (${code ?? signal ?? "unknown"})`;
+      this.child = null;
+      this.initialized = false;
+      this.threadId = null;
+      this.activeTurnId = null;
+      this.failAll(new Error(message));
+      this.lastError = message;
+      this.broadcast({ type: "error", message, status: this.getStatus() });
+    });
+  }
+
+  private handleLine(line: string) {
+    let message: CodexJsonRpcMessage;
+    try {
+      message = JSON.parse(line) as CodexJsonRpcMessage;
+    } catch {
+      return;
+    }
+
+    if (typeof message.id === "number") {
+      this.handleResponse(message);
+      return;
+    }
+
+    if (message.method) {
+      this.handleNotification(message.method, message.params ?? {});
+    }
+  }
+
+  private handleResponse(message: CodexJsonRpcMessage) {
+    const pending = this.pendingRequests.get(message.id ?? -1);
+    if (!pending) return;
+
+    this.pendingRequests.delete(message.id ?? -1);
+    clearTimeout(pending.timer);
+
+    if (message.error) {
+      pending.reject(new Error(message.error.message ?? "Codex app-server request failed"));
+      return;
+    }
+
+    pending.resolve(message.result ?? {});
+  }
+
+  private handleNotification(method: string, params: Record<string, unknown>) {
+    if (method === "turn/started") {
+      const turn = getObject(params.turn);
+      this.activeTurnId = getString(turn?.id) ?? this.activeTurnId;
+      this.broadcast({ type: "status", status: this.getStatus() });
+      return;
+    }
+
+    if (method === "item/agentMessage/delta") {
+      const text = extractCodexDelta(params);
+      if (text) {
+        this.broadcast({ type: "delta", text });
+      }
+      return;
+    }
+
+    if (method === "turn/completed") {
+      this.activeTurnId = null;
+      this.broadcast({ type: "done", status: this.getStatus() });
+      return;
+    }
+
+    if (method === "thread/started") {
+      const thread = getObject(params.thread);
+      this.threadId = getString(thread?.id) ?? this.threadId;
+      this.broadcast({ type: "status", status: this.getStatus() });
+    }
+  }
+
+  private sendRequest(method: string, params: Record<string, unknown>) {
+    const child = this.child;
+    if (!child) {
+      return Promise.reject(new Error("Codex app-server is not running"));
+    }
+
+    const id = this.nextRequestId++;
+    const payload = { method, id, params };
+
+    return new Promise<Record<string, unknown>>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRequests.delete(id);
+        reject(new Error(`Timed out waiting for Codex app-server: ${method}`));
+      }, 30000);
+
+      this.pendingRequests.set(id, { reject, resolve, timer });
+      child.stdin.write(`${JSON.stringify(payload)}\n`, (error) => {
+        if (!error) return;
+        clearTimeout(timer);
+        this.pendingRequests.delete(id);
+        reject(error);
+      });
+    });
+  }
+
+  private sendNotification(method: string, params: Record<string, unknown>) {
+    if (!this.child) return;
+    this.child.stdin.write(`${JSON.stringify({ method, params })}\n`);
+  }
+
+  private failAll(error: Error) {
+    for (const [id, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      this.pendingRequests.delete(id);
+    }
+  }
+
+  private broadcast(event: CodexChatEvent) {
+    this.events.emit("event", event);
+  }
+}
+
+const codexChatBridge = new CodexChatBridge({
+  cwd: docsConfig.projectDir,
+  serviceName: "smooth_docs_kit",
+});
+
+function resolveCodexCommand() {
+  const configured = process.env.SMOOTH_DOCS_CODEX_BIN || process.env.CODEX_BIN || "";
+  const executableName = process.platform === "win32" ? "codex.cmd" : "codex";
+  const pathCandidates = (process.env.PATH ?? "")
+    .split(path.delimiter)
+    .filter(Boolean)
+    .map((dir) => path.join(dir, executableName));
+  const homeCandidates = process.env.HOME
+    ? [
+        path.join(process.env.HOME, ".local", "bin", executableName),
+        path.join(process.env.HOME, ".codex", "bin", executableName),
+      ]
+    : [];
+  const candidates = [
+    configured,
+    ...pathCandidates,
+    "/Applications/Codex.app/Contents/Resources/codex",
+    "/opt/homebrew/bin/codex",
+    "/usr/local/bin/codex",
+    ...homeCandidates,
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => existsSync(candidate)) ?? null;
+}
+
+function getCodexProcessEnv(command: string) {
+  const commandDir = path.dirname(command);
+  const extraPathEntries = [
+    commandDir,
+    "/Applications/Codex.app/Contents/Resources",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ];
+
+  return {
+    ...process.env,
+    PATH: [...extraPathEntries, process.env.PATH].filter(Boolean).join(path.delimiter),
+  };
+}
+
+function buildCodexChatPrompt(request: CodexChatMessageRequest) {
+  const page = request.page ?? {};
+  const context = [
+    "You are being prompted from the Smooth Docs Kit browser preview.",
+    "Use the local repository and docs files as the source of truth.",
+    "",
+    "Current preview context:",
+    `- Site: ${page.site || "(unknown)"}`,
+    `- Page title: ${page.title || "(unknown)"}`,
+    `- Page URL: ${page.url || "(unknown)"}`,
+    `- Source path: ${page.sourcePath || "(unknown)"}`,
+  ];
+
+  const selection = request.selection?.trim();
+  if (selection) {
+    context.push("", "Selected text:", trimCodexContext(selection, 6000));
+  }
+
+  const contextBlocks = request.contextBlocks ?? [];
+  if (contextBlocks.length > 0) {
+    context.push("", "Attached docs context blocks:");
+
+    contextBlocks.slice(0, 8).forEach((block, index) => {
+      const label = block.label?.trim() || `Block ${index + 1}`;
+      const sourcePath = block.sourcePath?.trim();
+      context.push(
+        "",
+        `### ${label}`,
+        sourcePath ? `Source: ${sourcePath}` : "",
+        trimCodexContext(block.markdown ?? "", 8000),
+      );
+    });
+  }
+
+  context.push("", "User request:", request.text.trim());
+  return context.join("\n");
+}
+
+function trimCodexContext(value: string, maxLength: number) {
+  if (value.length <= maxLength) return value;
+  return `${value.slice(0, maxLength)}\n[truncated]`;
+}
+
+function extractCodexDelta(params: Record<string, unknown>) {
+  const delta = params.delta;
+  if (typeof delta === "string") return delta;
+  if (typeof params.text === "string") return params.text;
+  if (typeof params.message === "string") return params.message;
+
+  const deltaObject = getObject(delta);
+  if (typeof deltaObject?.text === "string") return deltaObject.text;
+  if (typeof deltaObject?.content === "string") return deltaObject.content;
+
+  return "";
+}
+
+function extractCodexThreadMessages(
+  thread: Record<string, unknown> | null,
+  threadId: string,
+): CodexChatHistoryMessage[] {
+  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
+  const messages: CodexChatHistoryMessage[] = [];
+
+  for (const turnValue of turns) {
+    const turn = getObject(turnValue);
+    if (!turn) continue;
+
+    const turnId = getString(turn.id) ?? `turn-${messages.length}`;
+    const items = Array.isArray(turn.items) ? turn.items : [];
+
+    for (const itemValue of items) {
+      const message = normalizeCodexThreadItem(itemValue);
+      if (!message?.content.trim()) continue;
+      messages.push({
+        id: message.id ?? `${threadId}:${turnId}:${messages.length}`,
+        role: message.role,
+        content: message.content.trim(),
+      });
+    }
+
+    const error = getObject(turn.error);
+    const errorMessage = getString(error?.message);
+    if (errorMessage) {
+      messages.push({
+        id: `${threadId}:${turnId}:error`,
+        role: "system",
+        content: errorMessage,
+      });
+    }
+  }
+
+  return messages;
+}
+
+function normalizeCodexThreadItem(value: unknown): {
+  id: string | null;
+  role: CodexChatRole;
+  content: string;
+} | null {
+  const item = getObject(value);
+  if (!item) return null;
+
+  const type = getString(item.type);
+  const id = getString(item.id);
+
+  if (type === "userMessage") {
+    const content = Array.isArray(item.content)
+      ? item.content.map(extractCodexUserInputText).filter(Boolean).join("\n\n")
+      : "";
+    return {
+      id,
+      role: "user",
+      content: extractOriginalCodexUserRequest(content),
+    };
+  }
+
+  if (type === "agentMessage") {
+    return {
+      id,
+      role: "assistant",
+      content: getString(item.text) ?? "",
+    };
+  }
+
+  return null;
+}
+
+function extractCodexUserInputText(value: unknown) {
+  const input = getObject(value);
+  if (!input) return "";
+
+  const type = getString(input.type);
+  if (type === "text") return getString(input.text) ?? "";
+
+  if (type === "image") {
+    const url = getString(input.url);
+    return url ? `![image](${url})` : "";
+  }
+
+  if (type === "localImage") {
+    const imagePath = getString(input.path);
+    return imagePath ? `![image](${imagePath})` : "";
+  }
+
+  if (type === "mention" || type === "skill") {
+    const name = getString(input.name);
+    return name ? `@${name}` : "";
+  }
+
+  return "";
+}
+
+function extractOriginalCodexUserRequest(value: string) {
+  const marker = "\nUser request:\n";
+  const markerIndex = value.lastIndexOf(marker);
+  if (markerIndex === -1) return value.trim();
+  return value.slice(markerIndex + marker.length).trim();
+}
+
+function isSmoothDocsCodexSession(value: unknown, cwd: string) {
+  const thread = getObject(value);
+  if (!thread) return false;
+
+  const threadCwd = getString(thread.cwd);
+  if (threadCwd && path.resolve(threadCwd) === path.resolve(cwd)) return true;
+
+  const preview = getString(thread.preview) ?? "";
+  return preview.includes("You are being prompted from the Smooth Docs Kit browser preview.");
+}
+
+function getObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function getString(value: unknown) {
+  return typeof value === "string" ? value : null;
+}
+
+function getNumber(value: unknown) {
+  return typeof value === "number" ? value : null;
+}
+
+function normalizeOptionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 async function handleDocsActionRequest(
   req: IncomingMessage,
   res: ServerResponse,
@@ -285,6 +1049,11 @@ async function handleDocsActionRequest(
   },
 ) {
   const url = new URL(req.url ?? "/", "http://localhost");
+
+  if (url.pathname.startsWith("/__smooth-docs/codex/")) {
+    await handleCodexChatRequest(req, res, url);
+    return;
+  }
 
   if (url.pathname === "/__smooth-docs/folders") {
     if (req.method !== "GET") {
@@ -551,6 +1320,233 @@ async function handleDocsActionRequest(
   }
 
   sendJson(res, 404, { error: "Unknown docs action" });
+}
+
+async function handleCodexChatRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  url: URL,
+) {
+  if (url.pathname === "/__smooth-docs/codex/status") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    sendJson(res, 200, codexChatBridge.getStatus());
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/events") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    res.writeHead(200, {
+      "Cache-Control": "no-cache, no-transform",
+      "Connection": "keep-alive",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "X-Accel-Buffering": "no",
+    });
+    sendSseEvent(res, "status", codexChatBridge.getStatus());
+
+    const removeListener = codexChatBridge.onEvent((event) => {
+      if (event.type === "status") {
+        sendSseEvent(res, "status", event.status);
+      } else {
+        sendSseEvent(res, event.type, event);
+      }
+    });
+
+    req.on("close", removeListener);
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/message") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    const request = normalizeCodexChatMessageRequest(body);
+    const result = await codexChatBridge.sendMessage(request);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/settings") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    const settings: { effort?: string | null; model?: string | null } = {};
+    if (Object.prototype.hasOwnProperty.call(body, "effort")) {
+      settings.effort = typeof body.effort === "string" ? body.effort : null;
+    }
+    if (Object.prototype.hasOwnProperty.call(body, "model")) {
+      settings.model = typeof body.model === "string" ? body.model : null;
+    }
+    const status = await codexChatBridge.configure(settings);
+    sendJson(res, 200, status);
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/models") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    const models = await codexChatBridge.listModels();
+    sendJson(res, 200, {
+      models,
+      status: codexChatBridge.getStatus(),
+    });
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/sessions") {
+    if (req.method !== "GET") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    const sessions = await codexChatBridge.listSessions();
+    sendJson(res, 200, { sessions });
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/session") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    const body = await readJsonBody(req);
+    const threadId = typeof body.threadId === "string" ? body.threadId : "";
+    const result = await codexChatBridge.resumeThread(threadId);
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/stop") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    const status = await codexChatBridge.stopActiveTurn();
+    sendJson(res, 200, status);
+    return;
+  }
+
+  if (url.pathname === "/__smooth-docs/codex/reset") {
+    if (req.method !== "POST") {
+      sendJson(res, 405, { error: "Method not allowed" });
+      return;
+    }
+
+    await codexChatBridge.resetThread();
+    sendJson(res, 200, codexChatBridge.getStatus());
+    return;
+  }
+
+  sendJson(res, 404, { error: "Unknown Codex chat action" });
+}
+
+function normalizeCodexChatMessageRequest(body: Record<string, unknown>): CodexChatMessageRequest {
+  const page = getObject(body.page);
+  const contextBlocks: NonNullable<CodexChatMessageRequest["contextBlocks"]> = Array.isArray(
+    body.contextBlocks,
+  )
+    ? body.contextBlocks
+        .flatMap((value) => {
+          const block = getObject(value);
+          if (!block) return [];
+          const normalized = {
+            label: typeof block.label === "string" ? block.label : "",
+            markdown: typeof block.markdown === "string" ? block.markdown : "",
+            sourcePath: typeof block.sourcePath === "string" ? block.sourcePath : "",
+          };
+          return normalized.markdown.trim() ? [normalized] : [];
+        })
+        .slice(0, 8)
+    : [];
+
+  return {
+    contextBlocks,
+    text: typeof body.text === "string" ? body.text : "",
+    selection: typeof body.selection === "string" ? body.selection : "",
+    page: page
+      ? {
+          title: typeof page.title === "string" ? page.title : "",
+          url: typeof page.url === "string" ? page.url : "",
+          sourcePath: typeof page.sourcePath === "string" ? page.sourcePath : "",
+          site: typeof page.site === "string" ? page.site : "",
+        }
+      : undefined,
+  };
+}
+
+function normalizeCodexModelOption(value: unknown): CodexModelOption | null {
+  const model = getObject(value);
+  if (!model) return null;
+
+  const modelId = getString(model.model) ?? getString(model.id);
+  if (!modelId) return null;
+
+  const effortOptions = Array.isArray(model.supportedReasoningEfforts)
+    ? model.supportedReasoningEfforts
+        .map((option) => {
+          const optionObject = getObject(option);
+          const value = getString(optionObject?.reasoningEffort);
+          if (!value) return null;
+          return {
+            value,
+            description: getString(optionObject?.description) ?? "",
+          };
+        })
+        .filter((option): option is { value: string; description: string } => Boolean(option))
+    : [];
+
+  return {
+    id: getString(model.id) ?? modelId,
+    model: modelId,
+    displayName: getString(model.displayName) ?? modelId,
+    description: getString(model.description) ?? "",
+    defaultEffort: getString(model.defaultReasoningEffort),
+    effortOptions,
+    isDefault: model.isDefault === true,
+  };
+}
+
+function normalizeCodexSessionSummary(value: unknown): CodexSessionSummary | null {
+  const thread = getObject(value);
+  const id = getString(thread?.id);
+  if (!thread || !id) return null;
+
+  const status = getObject(thread.status);
+  const preview = extractOriginalCodexUserRequest(getString(thread.preview) ?? "");
+  const name = getString(thread.name) ?? preview.split("\n")[0]?.trim() ?? id;
+
+  return {
+    id,
+    name: name || id,
+    preview,
+    cwd: getString(thread.cwd) ?? "",
+    modelProvider: getString(thread.modelProvider) ?? "",
+    updatedAt: getNumber(thread.updatedAt) ?? getNumber(thread.recencyAt) ?? 0,
+    status: getString(status?.type) ?? "unknown",
+  };
+}
+
+function sendSseEvent(res: ServerResponse, event: string, data: unknown) {
+  res.write(`event: ${event}\n`);
+  res.write(`data: ${JSON.stringify(data)}\n\n`);
 }
 
 function getThemeSettingsPayload() {

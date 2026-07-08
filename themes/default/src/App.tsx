@@ -1,6 +1,7 @@
 import * as React from "react";
 import { docsDataBySite as initialDocsDataBySite } from "#docs-data";
 import {
+    Bot,
     BookOpen,
     CheckCircle2,
     ChevronRight,
@@ -15,6 +16,8 @@ import {
     Inbox,
     Layout,
     Link as LinkIcon,
+    Loader2,
+    MessageSquareText,
     Maximize2,
     Minus,
     Moon,
@@ -24,7 +27,9 @@ import {
     Pin,
     Plus,
     RotateCcw,
+    Send,
     Settings as SettingsIcon,
+    Square,
     Sun,
     Trash2,
     Type,
@@ -179,6 +184,57 @@ type DocsEntryContextMenuRequest = {
 type PinToastState = {
     id: number;
     message: string;
+};
+
+type CodexChatMessage = {
+    id: string;
+    role: "assistant" | "system" | "user";
+    content: string;
+};
+
+type CodexChatStatus = {
+    available: boolean;
+    running: boolean;
+    threadId: string | null;
+    lastError: string;
+    selectedEffort: string | null;
+    selectedModel: string | null;
+};
+
+type CodexContextBlock = {
+    id: string;
+    label: string;
+    markdown: string;
+    sourcePath: string;
+};
+
+type CodexModelOption = {
+    id: string;
+    model: string;
+    displayName: string;
+    description: string;
+    defaultEffort: string | null;
+    effortOptions: Array<{
+        value: string;
+        description: string;
+    }>;
+    isDefault: boolean;
+};
+
+type CodexSessionSummary = {
+    id: string;
+    name: string;
+    preview: string;
+    cwd: string;
+    modelProvider: string;
+    updatedAt: number;
+    status: string;
+};
+
+type CodexSessionResumeResult = {
+    error?: string;
+    messages?: CodexChatMessage[];
+    status?: CodexChatStatus;
 };
 
 type FolderSuggestion = {
@@ -454,6 +510,13 @@ const siteLabels: Record<string, string> = {
     draft: "Draft",
 };
 
+const DEFAULT_CODEX_EFFORT_OPTIONS = [
+    { value: "minimal", description: "Minimal" },
+    { value: "low", description: "Low" },
+    { value: "medium", description: "Medium" },
+    { value: "high", description: "High" },
+];
+
 const availableSites = Object.keys(initialDocsDataBySite) as SiteKey[];
 const fallbackSite = availableSites[0] ?? "docs";
 
@@ -495,6 +558,7 @@ export function App() {
         initialDocsDataBySite[fallbackSite];
     const currentPage =
         docsData.pages.find((page) => page.url === route.pagePath) ?? docsData.pages[0];
+    const [pageTitleDraft, setPageTitleDraft] = React.useState(currentPage.title);
     const [readPageUrls, setReadPageUrls] = React.useState<ReadonlySet<string>>(() =>
         readReadPageUrls(route.site),
     );
@@ -509,6 +573,7 @@ export function App() {
     const [pinnedBlocks, setPinnedBlocks] = React.useState<PinnedBlock[]>(() =>
         readPinnedBlocks(pinPageKey),
     );
+    const [codexContextBlocks, setCodexContextBlocks] = React.useState<CodexContextBlock[]>([]);
     const [pinMenu, setPinMenu] = React.useState<PinMenuRequest | null>(null);
     const [docsEntryMenu, setDocsEntryMenu] =
         React.useState<DocsEntryContextMenuRequest | null>(null);
@@ -527,6 +592,8 @@ export function App() {
     const editorSaveTimerRef = React.useRef<number | null>(null);
     const editorSaveRequestRef = React.useRef(0);
     const editorSavedChangesRef = React.useRef(false);
+    const pageTitleDraftRef = React.useRef("");
+    const pageTitleSaveTimerRef = React.useRef<number | null>(null);
     const pageUrls = React.useMemo(
         () => new Set(docsData.pages.map((page) => page.url)),
         [docsData.pages],
@@ -754,6 +821,12 @@ export function App() {
     React.useEffect(() => {
         setEditMode(false);
         syncEditorFromPage(currentPage.markdown);
+        if (pageTitleSaveTimerRef.current !== null) {
+            window.clearTimeout(pageTitleSaveTimerRef.current);
+            pageTitleSaveTimerRef.current = null;
+        }
+        setPageTitleDraft(currentPage.title);
+        pageTitleDraftRef.current = currentPage.title;
     }, [currentPage.sourcePath, syncEditorFromPage]);
 
     React.useEffect(() => {
@@ -765,6 +838,26 @@ export function App() {
     React.useEffect(() => {
         editorTextRef.current = editorText;
     }, [editorText]);
+
+    React.useEffect(() => {
+        pageTitleDraftRef.current = pageTitleDraft;
+    }, [pageTitleDraft]);
+
+    React.useEffect(() => {
+        if (pageTitleSaveTimerRef.current !== null) return;
+
+        setPageTitleDraft(currentPage.title);
+        pageTitleDraftRef.current = currentPage.title;
+    }, [currentPage.title]);
+
+    React.useEffect(
+        () => () => {
+            if (pageTitleSaveTimerRef.current !== null) {
+                window.clearTimeout(pageTitleSaveTimerRef.current);
+            }
+        },
+        [],
+    );
 
     const navigateTo = React.useCallback(
         (url: string, nextSite = route.site) => {
@@ -1229,6 +1322,72 @@ export function App() {
         applyDocsContentUpdate(data);
     }, [applyDocsContentUpdate]);
 
+    const savePageTitle = React.useCallback(
+        async (title: string) => {
+            if (!canEditMarkdown) return;
+
+            const normalizedTitle = normalizeMarkdownTitle(title);
+            if (!normalizedTitle) {
+                setPageTitleDraft(currentPage.title);
+                pageTitleDraftRef.current = currentPage.title;
+                return;
+            }
+
+            const sourceMarkdown = editMode ? editorTextRef.current : currentPage.markdown;
+            const nextMarkdown = replaceMarkdownTitle(sourceMarkdown, normalizedTitle);
+            if (nextMarkdown === sourceMarkdown) return;
+
+            editorTextRef.current = nextMarkdown;
+            if (editMode) setEditorText(nextMarkdown);
+
+            const saved = await saveEditorText(nextMarkdown, { toastOnError: true });
+            if (!saved) return;
+
+            try {
+                await regenerateDocsContent();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Unknown error";
+                toast.error("Failed to update preview.", {
+                    description: message,
+                });
+            }
+        },
+        [
+            canEditMarkdown,
+            currentPage.markdown,
+            currentPage.title,
+            editMode,
+            regenerateDocsContent,
+            saveEditorText,
+        ],
+    );
+
+    const flushPageTitleSave = React.useCallback(() => {
+        if (pageTitleSaveTimerRef.current !== null) {
+            window.clearTimeout(pageTitleSaveTimerRef.current);
+            pageTitleSaveTimerRef.current = null;
+        }
+
+        void savePageTitle(pageTitleDraftRef.current);
+    }, [savePageTitle]);
+
+    const updatePageTitleDraft = React.useCallback(
+        (title: string) => {
+            setPageTitleDraft(title);
+            pageTitleDraftRef.current = title;
+
+            if (pageTitleSaveTimerRef.current !== null) {
+                window.clearTimeout(pageTitleSaveTimerRef.current);
+            }
+
+            pageTitleSaveTimerRef.current = window.setTimeout(() => {
+                pageTitleSaveTimerRef.current = null;
+                void savePageTitle(pageTitleDraftRef.current);
+            }, 500);
+        },
+        [savePageTitle],
+    );
+
     const enterEditMode = React.useCallback(() => {
         if (!canEditMarkdown) {
             toast.error("Current page is not a Markdown file.");
@@ -1394,6 +1553,42 @@ export function App() {
         [pinnedBlocks, savePinnedBlocksForCurrentPage, showPinToast],
     );
 
+    const addCodexContextFromPinMenu = React.useCallback(
+        (request: Pick<PinMenuRequest, "block" | "selectedMarkdown">) => {
+            const markdown = (request.selectedMarkdown ?? request.block?.markdown ?? "").trim();
+            if (!markdown) {
+                showPinToast("No Markdown found for Codex context.");
+                return;
+            }
+
+            const label = request.selectedMarkdown
+                ? "Selected text"
+                : request.block?.label || "Docs block";
+            const nextBlock: CodexContextBlock = {
+                id: `ctx-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+                label,
+                markdown,
+                sourcePath: currentPage.sourcePath,
+            };
+
+            setCodexContextBlocks((current) => {
+                const withoutDuplicate = current.filter(
+                    (block) =>
+                        block.markdown !== nextBlock.markdown ||
+                        block.sourcePath !== nextBlock.sourcePath,
+                );
+                return [...withoutDuplicate, nextBlock].slice(-8);
+            });
+
+            request.block?.sourceElement.classList.add("docs-pin-source--pinned");
+            window.setTimeout(() => {
+                request.block?.sourceElement.classList.remove("docs-pin-source--pinned");
+            }, 800);
+            showPinToast("Added Codex context.");
+        },
+        [currentPage.sourcePath, showPinToast],
+    );
+
     const removePinnedBlock = React.useCallback(
         (id: string) => {
             savePinnedBlocksForCurrentPage(pinnedBlocks.filter((block) => block.id !== id));
@@ -1550,8 +1745,8 @@ export function App() {
     ]);
 
     React.useEffect(() => {
-        document.title = `${currentPage.title} | ${docsData.siteTitle}`;
-    }, [currentPage.title, docsData.siteTitle]);
+        document.title = `${pageTitleDraft || currentPage.title} | ${docsData.siteTitle}`;
+    }, [currentPage.title, docsData.siteTitle, pageTitleDraft]);
 
     React.useEffect(() => {
         if (!uiSettings.autoHideHeader) {
@@ -1833,7 +2028,11 @@ export function App() {
                                 className='mx-auto flex w-full flex-col gap-0'
                                 style={{ maxWidth: "var(--docs-main-max-width)" }}>
                                 <PageHeader
+                                    canEditTitle={canEditMarkdown}
+                                    onTitleChange={updatePageTitleDraft}
+                                    onTitleSave={flushPageTitleSave}
                                     page={currentPage}
+                                    title={pageTitleDraft || currentPage.title}
                                 />
                                 {editMode ? (
                                     <MarkdownEditor
@@ -1915,6 +2114,10 @@ export function App() {
             <PinContextMenu
                 request={pinMenu}
                 onClose={closePinMenu}
+                onAddCodexContext={(request) => {
+                    addCodexContextFromPinMenu(request);
+                    setPinMenu(null);
+                }}
                 onCopyMarkdown={(markdown) => {
                     void copyWithToast(markdown, "Copied Markdown.").then((copied) => {
                         if (copied) setPinMenu(null);
@@ -1982,6 +2185,19 @@ export function App() {
                     setDeleteTarget(null);
                 }}
             />
+            {import.meta.hot ? (
+                <CodexChatWidget
+                    contextBlocks={codexContextBlocks}
+                    currentPage={currentPage}
+                    onContextBlockRemove={(id) =>
+                        setCodexContextBlocks((current) =>
+                            current.filter((block) => block.id !== id),
+                        )
+                    }
+                    onContextBlocksClear={() => setCodexContextBlocks([])}
+                    site={route.site}
+                />
+            ) : null}
             <Toaster position='bottom-right' theme={theme} closeButton />
             <PinToast toast={pinToast} onDone={dismissPinToast} />
         </SidebarProvider>
@@ -2414,11 +2630,13 @@ function PinnedBlocksPanel({
 }
 
 function PinContextMenu({
+    onAddCodexContext,
     onClose,
     onCopyMarkdown,
     onPin,
     request,
 }: {
+    onAddCodexContext: (request: Pick<PinMenuRequest, "block" | "selectedMarkdown">) => void;
     onClose: () => void;
     onCopyMarkdown: (markdown: string) => void;
     onPin: (block: NonNullable<PinMenuRequest["block"]>) => void;
@@ -2503,6 +2721,21 @@ function PinContextMenu({
                     onClick={() => onPin(block)}>
                     <Pin className='h-3.5 w-3.5' />
                     <span className='min-w-0 truncate'>Pin block</span>
+                </button>
+            )}
+            {(block?.markdown || selectedMarkdown) && (
+                <button
+                    type='button'
+                    className='docs-pin-context-menu-item'
+                    role='menuitem'
+                    onClick={() =>
+                        onAddCodexContext({
+                            block,
+                            selectedMarkdown,
+                        })
+                    }>
+                    <Bot className='h-3.5 w-3.5' />
+                    <span className='min-w-0 truncate'>Add to Codex context</span>
                 </button>
             )}
         </div>
@@ -2860,6 +3093,747 @@ function PinToast({ onDone, toast }: { onDone: () => void; toast: PinToastState 
             {toast.message}
         </div>
     );
+}
+
+function CodexChatWidget({
+    contextBlocks,
+    currentPage,
+    onContextBlockRemove,
+    onContextBlocksClear,
+    site,
+}: {
+    contextBlocks: CodexContextBlock[];
+    currentPage: DocPage;
+    onContextBlockRemove: (id: string) => void;
+    onContextBlocksClear: () => void;
+    site: SiteKey;
+}) {
+    const [open, setOpen] = React.useState(false);
+    const [draft, setDraft] = React.useState("");
+    const [messages, setMessages] = React.useState<CodexChatMessage[]>([]);
+    const [models, setModels] = React.useState<CodexModelOption[]>([]);
+    const [modelsLoading, setModelsLoading] = React.useState(false);
+    const [sending, setSending] = React.useState(false);
+    const [sessions, setSessions] = React.useState<CodexSessionSummary[]>([]);
+    const [sessionsLoading, setSessionsLoading] = React.useState(false);
+    const [sessionsOpen, setSessionsOpen] = React.useState(false);
+    const [status, setStatus] = React.useState<CodexChatStatus>({
+        available: true,
+        running: false,
+        threadId: null,
+        lastError: "",
+        selectedEffort: null,
+        selectedModel: null,
+    });
+    const assistantMessageIdRef = React.useRef<string | null>(null);
+    const endRef = React.useRef<HTMLDivElement>(null);
+
+    const appendMessage = React.useCallback((message: CodexChatMessage) => {
+        setMessages((current) => [...current, message]);
+    }, []);
+
+    const appendAssistantDelta = React.useCallback((text: string) => {
+        setMessages((current) => {
+            const assistantId = assistantMessageIdRef.current ?? createClientId();
+            assistantMessageIdRef.current = assistantId;
+            const existingIndex = current.findIndex((message) => message.id === assistantId);
+
+            if (existingIndex === -1) {
+                return [
+                    ...current,
+                    {
+                        id: assistantId,
+                        role: "assistant",
+                        content: text,
+                    },
+                ];
+            }
+
+            return current.map((message, index) =>
+                index === existingIndex
+                    ? { ...message, content: `${message.content}${text}` }
+                    : message,
+            );
+        });
+    }, []);
+
+    React.useEffect(() => {
+        const source = new EventSource("/__smooth-docs/codex/events");
+
+        const readData = <T,>(event: MessageEvent<string>) => {
+            try {
+                return JSON.parse(event.data) as T;
+            } catch {
+                return null;
+            }
+        };
+
+        const onStatus = (event: MessageEvent<string>) => {
+            const data = readData<CodexChatStatus>(event);
+            if (data) setStatus(data);
+        };
+
+        const onDelta = (event: MessageEvent<string>) => {
+            const data = readData<{ text?: string }>(event);
+            if (data?.text) appendAssistantDelta(data.text);
+        };
+
+        const onDone = (event: MessageEvent<string>) => {
+            const data = readData<{ status?: CodexChatStatus }>(event);
+            if (data?.status) setStatus(data.status);
+            assistantMessageIdRef.current = null;
+        };
+
+        const onCodexError = (event: MessageEvent<string>) => {
+            const data = readData<{ message?: string; status?: CodexChatStatus }>(event);
+            const message = data?.message || "Codex chat failed";
+            if (data?.status) setStatus(data.status);
+            appendMessage({
+                id: createClientId(),
+                role: "system",
+                content: message,
+            });
+            assistantMessageIdRef.current = null;
+        };
+
+        source.addEventListener("status", onStatus);
+        source.addEventListener("delta", onDelta);
+        source.addEventListener("done", onDone);
+        source.addEventListener("error", onCodexError);
+        source.onerror = () => {
+            setStatus((current) => ({
+                ...current,
+                available: false,
+                running: false,
+                lastError: current.lastError || "Codex chat connection failed",
+            }));
+        };
+
+        return () => {
+            source.removeEventListener("status", onStatus);
+            source.removeEventListener("delta", onDelta);
+            source.removeEventListener("done", onDone);
+            source.removeEventListener("error", onCodexError);
+            source.close();
+        };
+    }, [appendAssistantDelta, appendMessage]);
+
+    React.useEffect(() => {
+        if (!open) return;
+        endRef.current?.scrollIntoView({ block: "end" });
+    }, [messages, open, status.running]);
+
+    const loadModels = React.useCallback(async () => {
+        setModelsLoading(true);
+
+        try {
+            const response = await fetch("/__smooth-docs/codex/models", { method: "GET" });
+            const data = (await response.json().catch(() => ({}))) as {
+                models?: CodexModelOption[];
+                status?: CodexChatStatus;
+                error?: string;
+            };
+
+            if (!response.ok) {
+                throw new Error(data.error ?? "Failed to load models");
+            }
+
+            setModels(Array.isArray(data.models) ? data.models : []);
+            if (data.status) setStatus(data.status);
+        } catch (error) {
+            appendMessage({
+                id: createClientId(),
+                role: "system",
+                content: error instanceof Error ? error.message : "Failed to load models",
+            });
+        } finally {
+            setModelsLoading(false);
+        }
+    }, [appendMessage]);
+
+    const updateCodexSettings = React.useCallback(
+        async (next: { effort?: string | null; model?: string | null }) => {
+            const nextModel =
+                "model" in next ? next.model ?? null : status.selectedModel;
+            const nextEffort =
+                "effort" in next ? next.effort ?? null : status.selectedEffort;
+
+            setStatus((current) => ({
+                ...current,
+                selectedEffort: nextEffort,
+                selectedModel: nextModel,
+            }));
+
+            try {
+                const response = await fetch("/__smooth-docs/codex/settings", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        effort: nextEffort,
+                        model: nextModel,
+                    }),
+                });
+                const data = (await response.json().catch(() => ({}))) as Partial<CodexChatStatus> & {
+                    error?: string;
+                };
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? "Failed to update Codex settings");
+                }
+
+                setStatus((current) => ({ ...current, ...data }));
+            } catch (error) {
+                appendMessage({
+                    id: createClientId(),
+                    role: "system",
+                    content:
+                        error instanceof Error
+                            ? error.message
+                            : "Failed to update Codex settings",
+                });
+            }
+        },
+        [appendMessage, status.selectedEffort, status.selectedModel],
+    );
+
+    const loadSessions = React.useCallback(async () => {
+        setSessionsLoading(true);
+
+        try {
+            const response = await fetch("/__smooth-docs/codex/sessions", { method: "GET" });
+            const data = (await response.json().catch(() => ({}))) as {
+                sessions?: CodexSessionSummary[];
+                error?: string;
+            };
+
+            if (!response.ok) {
+                throw new Error(data.error ?? "Failed to load sessions");
+            }
+
+            setSessions(Array.isArray(data.sessions) ? data.sessions : []);
+        } catch (error) {
+            appendMessage({
+                id: createClientId(),
+                role: "system",
+                content: error instanceof Error ? error.message : "Failed to load sessions",
+            });
+        } finally {
+            setSessionsLoading(false);
+        }
+    }, [appendMessage]);
+
+    React.useEffect(() => {
+        if (!open || models.length > 0 || modelsLoading) return;
+        void loadModels();
+    }, [loadModels, models.length, modelsLoading, open]);
+
+    const toggleSessions = React.useCallback(() => {
+        setSessionsOpen((current) => {
+            const next = !current;
+            if (next) void loadSessions();
+            return next;
+        });
+    }, [loadSessions]);
+
+    const resumeSession = React.useCallback(
+        async (threadId: string) => {
+            if (status.running) return;
+
+            try {
+                const response = await fetch("/__smooth-docs/codex/session", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ threadId }),
+                });
+                const data = (await response.json().catch(() => ({}))) as CodexSessionResumeResult;
+
+                if (!response.ok) {
+                    throw new Error(data.error ?? "Failed to resume session");
+                }
+
+                setMessages(normalizeCodexChatMessages(data.messages));
+                assistantMessageIdRef.current = null;
+                if (data.status) {
+                    setStatus((current) => ({ ...current, ...data.status }));
+                }
+                setSessionsOpen(false);
+            } catch (error) {
+                appendMessage({
+                    id: createClientId(),
+                    role: "system",
+                    content: error instanceof Error ? error.message : "Failed to resume session",
+                });
+            }
+        },
+        [appendMessage, status.running],
+    );
+
+    const stopTurn = React.useCallback(async () => {
+        if (!status.running) return;
+
+        try {
+            const response = await fetch("/__smooth-docs/codex/stop", { method: "POST" });
+            const data = (await response.json().catch(() => ({}))) as Partial<CodexChatStatus> & {
+                error?: string;
+            };
+
+            if (!response.ok) {
+                throw new Error(data.error ?? "Failed to stop Codex");
+            }
+
+            assistantMessageIdRef.current = null;
+            setStatus((current) => ({ ...current, ...data, running: false }));
+        } catch (error) {
+            appendMessage({
+                id: createClientId(),
+                role: "system",
+                content: error instanceof Error ? error.message : "Failed to stop Codex",
+            });
+        }
+    }, [appendMessage, status.running]);
+
+    const submit = React.useCallback(async () => {
+        const text = draft.trim();
+        if (!text || sending || status.running) return;
+
+        const assistantId = createClientId();
+        assistantMessageIdRef.current = assistantId;
+        setDraft("");
+        setSending(true);
+        setMessages((current) => [
+            ...current,
+            {
+                id: createClientId(),
+                role: "user",
+                content: text,
+            },
+            {
+                id: assistantId,
+                role: "assistant",
+                content: "",
+            },
+        ]);
+
+        try {
+            const response = await fetch("/__smooth-docs/codex/message", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    contextBlocks: contextBlocks.map((block) => ({
+                        label: block.label,
+                        markdown: block.markdown,
+                        sourcePath: block.sourcePath,
+                    })),
+                    text,
+                    page: {
+                        title: currentPage.title,
+                        url: currentPage.url,
+                        sourcePath: currentPage.sourcePath,
+                        site,
+                    },
+                    selection: getSelectedText(),
+                }),
+            });
+            const data = (await response.json().catch(() => ({}))) as {
+                error?: string;
+                lastError?: string;
+            };
+
+            if (!response.ok) {
+                throw new Error(data.error ?? data.lastError ?? "Failed to send Codex message");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to send Codex message";
+            assistantMessageIdRef.current = null;
+            setMessages((current) =>
+                current.map((entry) =>
+                    entry.id === assistantId
+                        ? {
+                              ...entry,
+                              role: "system",
+                              content: message,
+                          }
+                        : entry,
+                ),
+            );
+            setStatus((current) => ({
+                ...current,
+                running: false,
+                lastError: message,
+            }));
+        } finally {
+            setSending(false);
+        }
+    }, [
+        contextBlocks,
+        currentPage.sourcePath,
+        currentPage.title,
+        currentPage.url,
+        draft,
+        sending,
+        site,
+        status.running,
+    ]);
+
+    const reset = React.useCallback(async () => {
+        if (status.running) return;
+
+        setMessages([]);
+        assistantMessageIdRef.current = null;
+
+        try {
+            const response = await fetch("/__smooth-docs/codex/reset", { method: "POST" });
+            const data = (await response.json().catch(() => ({}))) as Partial<CodexChatStatus> & {
+                error?: string;
+            };
+            if (!response.ok) {
+                throw new Error(data.error ?? "Failed to reset Codex chat");
+            }
+            setStatus((current) => ({ ...current, ...data }));
+        } catch (error) {
+            const message = error instanceof Error ? error.message : "Failed to reset Codex chat";
+            appendMessage({
+                id: createClientId(),
+                role: "system",
+                content: message,
+            });
+        }
+    }, [appendMessage, status.running]);
+
+    const onDraftKeyDown = React.useCallback(
+        (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+            if (event.key !== "Enter" || event.shiftKey) return;
+            event.preventDefault();
+            void submit();
+        },
+        [submit],
+    );
+
+    const selectedModel =
+        status.selectedModel || models.find((model) => model.isDefault)?.model || models[0]?.model || "";
+    const currentModel = models.find((model) => model.model === selectedModel);
+    const effortOptions =
+        currentModel?.effortOptions.length
+            ? currentModel.effortOptions
+            : DEFAULT_CODEX_EFFORT_OPTIONS;
+    const selectedEffort =
+        status.selectedEffort ||
+        currentModel?.defaultEffort ||
+        effortOptions[0]?.value ||
+        "";
+    const chatLabel = status.running ? "Working" : status.lastError ? "Offline" : "Ready";
+    const canSend = draft.trim().length > 0 && !sending && !status.running;
+
+    return (
+        <div className='fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-3'>
+            {open && (
+                <section
+                    aria-label='Codex chat'
+                    className='flex h-[min(680px,calc(100vh-6rem))] w-[min(520px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border bg-background shadow-2xl'>
+                    <div className='flex h-12 shrink-0 items-center gap-2 border-b px-3'>
+                        <Bot className='h-4 w-4 text-muted-foreground' />
+                        <div className='min-w-0 flex-1'>
+                            <div className='truncate text-sm font-medium'>Codex</div>
+                            <div className='truncate text-xs text-muted-foreground'>
+                                {chatLabel}
+                            </div>
+                        </div>
+                        <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='icon'
+                                        className='h-8 w-8'
+                                        onClick={toggleSessions}
+                                        aria-label='Show Codex sessions'>
+                                        <PanelRight className='h-3.5 w-3.5' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Sessions</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='icon'
+                                        className='h-8 w-8'
+                                        disabled={!status.running}
+                                        onClick={() => void stopTurn()}
+                                        aria-label='Stop Codex turn'>
+                                        <Square className='h-3.5 w-3.5' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Stop</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='icon'
+                                        className='h-8 w-8'
+                                        disabled={status.running}
+                                        onClick={() => void reset()}
+                                        aria-label='New Codex thread'>
+                                        <RotateCcw className='h-3.5 w-3.5' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>New thread</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='ghost'
+                                        size='icon'
+                                        className='h-8 w-8'
+                                        onClick={() => setOpen(false)}
+                                        aria-label='Close Codex chat'>
+                                        <X className='h-3.5 w-3.5' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Close</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    </div>
+
+                    <div className='grid shrink-0 gap-2 border-b p-2 sm:grid-cols-[minmax(0,1fr)_10rem]'>
+                        <select
+                            className='h-8 min-w-0 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                            value={selectedModel}
+                            disabled={modelsLoading || status.running}
+                            onChange={(event) => {
+                                const model = event.target.value || null;
+                                const nextModel = models.find((item) => item.model === model);
+                                void updateCodexSettings({
+                                    model,
+                                    effort: nextModel?.defaultEffort ?? selectedEffort,
+                                });
+                            }}
+                            aria-label='Codex model'>
+                            {models.length === 0 ? (
+                                <option value=''>
+                                    {modelsLoading ? "Loading models..." : "Default model"}
+                                </option>
+                            ) : (
+                                models.map((model) => (
+                                    <option key={model.id} value={model.model}>
+                                        {model.displayName}
+                                    </option>
+                                ))
+                            )}
+                        </select>
+                        <select
+                            className='h-8 min-w-0 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                            value={selectedEffort}
+                            disabled={status.running}
+                            onChange={(event) =>
+                                void updateCodexSettings({ effort: event.target.value || null })
+                            }
+                            aria-label='Codex reasoning effort'>
+                            {effortOptions.map((option) => (
+                                <option key={option.value} value={option.value}>
+                                    {formatCodexEffortLabel(option.value)}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {sessionsOpen && (
+                        <div className='max-h-52 shrink-0 overflow-y-auto border-b p-2'>
+                            <div className='mb-2 flex items-center justify-between gap-2'>
+                                <span className='text-xs font-medium text-muted-foreground'>
+                                    Sessions
+                                </span>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='sm'
+                                    className='h-7 px-2 text-xs'
+                                    disabled={sessionsLoading}
+                                    onClick={() => void loadSessions()}>
+                                    Refresh
+                                </Button>
+                            </div>
+                            {sessionsLoading ? (
+                                <div className='py-3 text-center text-xs text-muted-foreground'>
+                                    Loading...
+                                </div>
+                            ) : sessions.length === 0 ? (
+                                <div className='py-3 text-center text-xs text-muted-foreground'>
+                                    No sessions
+                                </div>
+                            ) : (
+                                <div className='space-y-1'>
+                                    {sessions.map((session) => (
+                                        <button
+                                            key={session.id}
+                                            type='button'
+                                            className={cn(
+                                                "flex w-full min-w-0 flex-col rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
+                                                session.id === status.threadId && "bg-accent",
+                                            )}
+                                            disabled={status.running}
+                                            onClick={() => void resumeSession(session.id)}>
+                                            <span className='truncate font-medium'>
+                                                {session.name}
+                                            </span>
+                                            <span className='truncate text-muted-foreground'>
+                                                {formatCodexSessionTimestamp(session.updatedAt)} ·{" "}
+                                                {session.status}
+                                            </span>
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3'>
+                        {messages.length === 0 ? (
+                            <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+                                No messages yet
+                            </div>
+                        ) : (
+                            messages.map((message) => (
+                                <div
+                                    key={message.id}
+                                    className={cn(
+                                        "flex",
+                                        message.role === "user" ? "justify-end" : "justify-start",
+                                    )}>
+                                    <div
+                                        className={cn(
+                                            "max-w-[85%] rounded-md border px-3 py-2 text-sm leading-6",
+                                            message.role === "user"
+                                                ? "border-primary bg-primary text-primary-foreground"
+                                                : message.role === "system"
+                                                  ? "border-destructive/40 bg-destructive/10 text-destructive"
+                                                  : "bg-card text-card-foreground",
+                                        )}>
+                                        {message.content ? (
+                                            <ChatMarkdownMessage content={message.content} />
+                                        ) : (
+                                            <span className='inline-flex items-center gap-2 text-muted-foreground'>
+                                                <Loader2 className='h-3.5 w-3.5 animate-spin' />
+                                                Working
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+                            ))
+                        )}
+                        <div ref={endRef} />
+                    </div>
+
+                    {status.lastError && (
+                        <div className='border-t px-3 py-2 text-xs text-destructive'>
+                            {status.lastError}
+                        </div>
+                    )}
+
+                    <div className='border-t p-3'>
+                        {contextBlocks.length > 0 && (
+                            <div className='mb-2 flex flex-wrap items-center gap-1.5'>
+                                {contextBlocks.map((block) => (
+                                    <span
+                                        key={block.id}
+                                        className='inline-flex max-w-full items-center gap-1 rounded-md border bg-muted px-2 py-1 text-xs text-muted-foreground'>
+                                        <FileText className='h-3 w-3 shrink-0' />
+                                        <span className='max-w-40 truncate'>{block.label}</span>
+                                        <button
+                                            type='button'
+                                            className='rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                                            onClick={() => onContextBlockRemove(block.id)}
+                                            aria-label={`Remove Codex context: ${block.label}`}>
+                                            <X className='h-3 w-3' />
+                                        </button>
+                                    </span>
+                                ))}
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='sm'
+                                    className='h-7 px-2 text-xs'
+                                    onClick={onContextBlocksClear}>
+                                    Clear
+                                </Button>
+                            </div>
+                        )}
+                        <div className='flex items-end gap-2'>
+                            <textarea
+                                className='max-h-32 min-h-20 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm leading-5 outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring'
+                                value={draft}
+                                onChange={(event) => setDraft(event.target.value)}
+                                onKeyDown={onDraftKeyDown}
+                                placeholder='Ask Codex...'
+                                spellCheck={true}
+                            />
+                            <Button
+                                type='button'
+                                size='icon'
+                                className='h-10 w-10 shrink-0'
+                                disabled={!canSend}
+                                onClick={() => void submit()}
+                                aria-label='Send Codex message'>
+                                {sending || status.running ? (
+                                    <Loader2 className='h-4 w-4 animate-spin' />
+                                ) : (
+                                    <Send className='h-4 w-4' />
+                                )}
+                            </Button>
+                        </div>
+                    </div>
+                </section>
+            )}
+
+            <TooltipProvider delayDuration={300}>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <Button
+                            type='button'
+                            size='icon'
+                            className='h-11 w-11 rounded-full shadow-lg'
+                            onClick={() => setOpen((value) => !value)}
+                            aria-label='Open Codex chat'>
+                            {status.running ? (
+                                <Loader2 className='h-5 w-5 animate-spin' />
+                            ) : (
+                                <MessageSquareText className='h-5 w-5' />
+                            )}
+                        </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side='left'>Codex</TooltipContent>
+                </Tooltip>
+            </TooltipProvider>
+        </div>
+    );
+}
+
+function ChatMarkdownMessage({ content }: { content: string }) {
+    const [html, setHtml] = React.useState(() => renderChatMarkdownSync(content));
+
+    React.useEffect(() => {
+        let active = true;
+        setHtml(renderChatMarkdownSync(content));
+
+        void loadChatMarkdownRenderer()
+            .then((renderer) => {
+                if (active) setHtml(renderer.render(content));
+            })
+            .catch(() => {
+                if (active) setHtml(renderPlainChatText(content));
+            });
+
+        return () => {
+            active = false;
+        };
+    }, [content]);
+
+    return <div className='docs-chat-markdown' dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 function ActionCommandDialog({
@@ -4116,15 +5090,46 @@ function SettingSwitch({
 }
 
 function PageHeader({
+    canEditTitle,
+    onTitleChange,
+    onTitleSave,
     page,
+    title,
 }: {
+    canEditTitle: boolean;
+    onTitleChange: (title: string) => void;
+    onTitleSave: () => void;
     page: DocPage;
+    title: string;
 }) {
+    const textareaRef = React.useRef<HTMLTextAreaElement>(null);
+
+    React.useLayoutEffect(() => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+
+        textarea.style.height = "0px";
+        textarea.style.height = `${textarea.scrollHeight}px`;
+    }, [title]);
+
     return (
         <div className='docs-page-header space-y-4'>
-            <h1 className='docs-page-title break-words text-2xl font-semibold tracking-normal md:text-3xl'>
-                {page.title}
-            </h1>
+            {canEditTitle ? (
+                <textarea
+                    ref={textareaRef}
+                    aria-label='Page title'
+                    className='docs-page-title docs-page-title-input break-words text-2xl font-semibold tracking-normal md:text-3xl'
+                    rows={1}
+                    spellCheck={false}
+                    value={title}
+                    onBlur={onTitleSave}
+                    onChange={(event) => onTitleChange(event.target.value)}
+                />
+            ) : (
+                <h1 className='docs-page-title break-words text-2xl font-semibold tracking-normal md:text-3xl'>
+                    {page.title}
+                </h1>
+            )}
             <Separator />
         </div>
     );
@@ -6362,6 +7367,78 @@ function stripMarkdownFrontmatter(markdown: string) {
     return endIndex > 0 ? lines.slice(endIndex + 1).join("\n") : markdown;
 }
 
+function normalizeMarkdownTitle(title: string) {
+    return title.replace(/\s+/g, " ").trim();
+}
+
+function replaceMarkdownTitle(markdown: string, title: string) {
+    const normalizedTitle = normalizeMarkdownTitle(title);
+    if (!normalizedTitle) return markdown;
+
+    const lines = markdown.split(/\r?\n/);
+    const headingIndex = findMarkdownTitleHeadingIndex(lines);
+
+    if (headingIndex >= 0) {
+        const nextLines = [...lines];
+        nextLines[headingIndex] = `# ${normalizedTitle}`;
+        return nextLines.join("\n");
+    }
+
+    const frontmatter = getMarkdownFrontmatterRange(lines);
+    if (frontmatter) {
+        const titleIndex = lines.findIndex(
+            (line, index) =>
+                index > frontmatter.start &&
+                index < frontmatter.end &&
+                /^title\s*:/i.test(line.trim()),
+        );
+        const nextLines = [...lines];
+        const titleLine = `title: ${JSON.stringify(normalizedTitle)}`;
+
+        if (titleIndex >= 0) {
+            nextLines[titleIndex] = titleLine;
+        } else {
+            nextLines.splice(frontmatter.start + 1, 0, titleLine);
+        }
+
+        return nextLines.join("\n");
+    }
+
+    return `# ${normalizedTitle}\n\n${markdown.replace(/^\s+/, "")}`;
+}
+
+function findMarkdownTitleHeadingIndex(lines: string[]) {
+    let inFence = false;
+    let fenceMarker = "";
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? "";
+        const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
+        if (fenceMatch) {
+            const marker = fenceMatch[1]?.[0] ?? "";
+            if (!inFence) {
+                inFence = true;
+                fenceMarker = marker;
+            } else if (marker === fenceMarker) {
+                inFence = false;
+                fenceMarker = "";
+            }
+            continue;
+        }
+
+        if (!inFence && /^ {0,3}#\s+.+?\s*$/.test(line)) return index;
+    }
+
+    return -1;
+}
+
+function getMarkdownFrontmatterRange(lines: string[]) {
+    if (lines[0]?.trim() !== "---") return null;
+
+    const end = lines.findIndex((line, index) => index > 0 && line.trim() === "---");
+    return end > 0 ? { start: 0, end } : null;
+}
+
 function findMarkdownLineRange(markdown: string, selectedText: string) {
     const selectedLines = selectedText.split(/\r?\n/).map(normalizeMatchText).filter(Boolean);
 
@@ -7642,6 +8719,108 @@ function getPathDirName(value: string) {
 function joinDocsPath(folderPath: string, fileName: string) {
     const folder = stripDocsPathPrefix(folderPath).replace(/\/+$/, "");
     return folder ? `${folder}/${fileName}` : fileName;
+}
+
+function createClientId() {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function normalizeCodexChatMessages(messages: CodexChatMessage[] | undefined) {
+    if (!Array.isArray(messages)) return [];
+
+    return messages
+        .map((message) => {
+            const role =
+                message.role === "assistant" || message.role === "system" || message.role === "user"
+                    ? message.role
+                    : null;
+            const content = typeof message.content === "string" ? message.content : "";
+            if (!role || !content.trim()) return null;
+
+            return {
+                id: typeof message.id === "string" && message.id ? message.id : createClientId(),
+                role,
+                content,
+            };
+        })
+        .filter((message): message is CodexChatMessage => Boolean(message));
+}
+
+function formatCodexEffortLabel(value: string) {
+    return value
+        .replace(/[_-]+/g, " ")
+        .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function formatCodexSessionTimestamp(value: number) {
+    if (!value) return "Unknown time";
+    return new Date(value * 1000).toLocaleString([], {
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        month: "short",
+    });
+}
+
+type ChatMarkdownRenderer = {
+    render: (markdown: string) => string;
+};
+
+let chatMarkdownRenderer: ChatMarkdownRenderer | null = null;
+let chatMarkdownRendererPromise: Promise<ChatMarkdownRenderer> | null = null;
+
+function renderChatMarkdownSync(markdown: string) {
+    return chatMarkdownRenderer?.render(markdown) ?? renderPlainChatText(markdown);
+}
+
+function loadChatMarkdownRenderer() {
+    if (chatMarkdownRenderer) return Promise.resolve(chatMarkdownRenderer);
+
+    chatMarkdownRendererPromise ??= import("markdown-it").then(({ default: MarkdownIt }) => {
+        const markdown = new MarkdownIt({
+            breaks: true,
+            html: false,
+            linkify: true,
+        });
+        const defaultLinkOpen: NonNullable<typeof markdown.renderer.rules.link_open> =
+            markdown.renderer.rules.link_open ??
+            ((tokens, index, options, environment, self) =>
+                self.renderToken(tokens, index, options));
+
+        markdown.renderer.rules.link_open = (tokens, index, options, environment, self) => {
+            const token = tokens[index];
+            token.attrSet("target", "_blank");
+            token.attrSet("rel", "noreferrer");
+            return defaultLinkOpen(tokens, index, options, environment, self);
+        };
+
+        chatMarkdownRenderer = {
+            render(value) {
+                return markdown.render(value);
+            },
+        };
+        return chatMarkdownRenderer;
+    });
+
+    return chatMarkdownRendererPromise;
+}
+
+function renderPlainChatText(value: string) {
+    return escapeHtml(value).replace(/\n/g, "<br>");
+}
+
+function escapeHtml(value: string) {
+    return value
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function getSelectedText() {
+    const selection = window.getSelection()?.toString().trim() ?? "";
+    return selection.length > 6000 ? `${selection.slice(0, 6000)}\n[truncated]` : selection;
 }
 
 function isPrimaryShortcut(event: KeyboardEvent) {
