@@ -638,7 +638,6 @@ export function App() {
     );
     const hasPinnedBlocks = pinnedBlocks.length > 0;
     const hasDocsSidePanel = hasPinnedBlocks || tableOfContents.length > 0;
-    const codexChatSidebarOpen = import.meta.env.DEV && codexChatOpen;
     const canSwitchDocsTheme = true;
     const canEditMarkdown =
         import.meta.env.DEV &&
@@ -648,7 +647,7 @@ export function App() {
         import.meta.env.DEV && currentPage.absolutePath.trim().length > 0;
     const canRenderDocsSidePanel = !zenMode && !editMode && hasDocsSidePanel;
     const rightSidebarOpen = canRenderDocsSidePanel && uiSettings.showRightSidebar;
-    const rightPanelOpen = codexChatSidebarOpen || rightSidebarOpen;
+    const rightPanelOpen = rightSidebarOpen;
 
     React.useEffect(() => {
         setPinnedBlocks(readPinnedBlocks(pinPageKey));
@@ -2215,7 +2214,6 @@ export function App() {
                             <CodexChatWidget
                                 contextBlocks={codexContextBlocks}
                                 currentPage={currentPage}
-                                headerVisible={headerVisible}
                                 onContextBlockRemove={(id) =>
                                     setCodexContextBlocks((current) =>
                                         current.filter((block) => block.id !== id),
@@ -2228,7 +2226,7 @@ export function App() {
                             />
                         ) : null}
 
-                        {!codexChatSidebarOpen && rightSidebarOpen && hasPinnedBlocks ? (
+                        {rightSidebarOpen && hasPinnedBlocks ? (
                             <PinnedBlocksPanel
                                 blocks={pinnedBlocks}
                                 fontStepIndex={pinFontStepIndex}
@@ -2241,7 +2239,7 @@ export function App() {
                                 wrapText={uiSettings.pinPanelWrap}
                                 width={pinPanelWidth}
                             />
-                        ) : !codexChatSidebarOpen && rightSidebarOpen ? (
+                        ) : rightSidebarOpen ? (
                             <TableOfContents
                                 items={tableOfContents}
                                 headerVisible={headerVisible}
@@ -3237,7 +3235,6 @@ function PinToast({ onDone, toast }: { onDone: () => void; toast: PinToastState 
 function CodexChatWidget({
     contextBlocks,
     currentPage,
-    headerVisible,
     onContextBlockRemove,
     onContextBlocksClear,
     onOpenChange,
@@ -3246,7 +3243,6 @@ function CodexChatWidget({
 }: {
     contextBlocks: CodexContextBlock[];
     currentPage: DocPage;
-    headerVisible: boolean;
     onContextBlockRemove: (id: string) => void;
     onContextBlocksClear: () => void;
     onOpenChange: (open: boolean) => void;
@@ -3257,6 +3253,8 @@ function CodexChatWidget({
     const [messages, setMessages] = React.useState<CodexChatMessage[]>([]);
     const [models, setModels] = React.useState<CodexModelOption[]>([]);
     const [modelsLoading, setModelsLoading] = React.useState(false);
+    const [panelMounted, setPanelMounted] = React.useState(open);
+    const [panelVisible, setPanelVisible] = React.useState(open);
     const [sending, setSending] = React.useState(false);
     const [sessions, setSessions] = React.useState<CodexSessionSummary[]>([]);
     const [sessionsLoading, setSessionsLoading] = React.useState(false);
@@ -3366,6 +3364,18 @@ function CodexChatWidget({
         if (!open) return;
         endRef.current?.scrollIntoView({ block: "end" });
     }, [messages, open, status.running]);
+
+    React.useEffect(() => {
+        if (open) {
+            setPanelMounted(true);
+            const frame = window.requestAnimationFrame(() => setPanelVisible(true));
+            return () => window.cancelAnimationFrame(frame);
+        }
+
+        setPanelVisible(false);
+        const timer = window.setTimeout(() => setPanelMounted(false), 200);
+        return () => window.clearTimeout(timer);
+    }, [open]);
 
     const loadModels = React.useCallback(async () => {
         setModelsLoading(true);
@@ -3667,17 +3677,18 @@ function CodexChatWidget({
         "";
     const chatLabel = status.running ? "Working" : status.lastError ? "Offline" : "Ready";
     const canSend = draft.trim().length > 0 && !sending && !status.running;
+    const showPanel = open || panelMounted;
 
     return (
         <>
-            {open ? (
+            {showPanel ? (
                 <section
                     aria-label='Codex chat'
                     className={cn(
-                        "relative z-50 order-first flex h-[min(760px,calc(100vh-6rem))] w-full flex-col overflow-hidden rounded-md border bg-background lg:order-none lg:w-[min(440px,38vw)] lg:min-w-[360px] lg:shrink-0 lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none",
-                        headerVisible
-                            ? "lg:sticky lg:top-14 lg:h-[calc(100vh-3.5rem)]"
-                            : "lg:sticky lg:top-0 lg:h-screen",
+                        "fixed bottom-4 right-4 top-4 z-50 flex w-[min(440px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border bg-background shadow-2xl transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
+                        panelVisible
+                            ? "translate-x-0 opacity-100"
+                            : "pointer-events-none translate-x-6 opacity-0",
                     )}>
                     <div className='flex h-12 shrink-0 items-center gap-2 border-b px-3'>
                         <Bot className='h-4 w-4 text-muted-foreground' />
