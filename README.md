@@ -55,6 +55,34 @@ smdocs build /path/to/path-a-doc
 
 The default output directory is `site/` inside the docs project.
 
+Static builds are public-viewer output. Local editing controls, file/folder
+management actions, Codex chat, and absolute filesystem path copying are
+disabled in the generated site. CSS-only docs themes bundled at build time can
+still be switched by readers from the static site.
+
+Use top-level `theme` for local editing and preview. Set `publish.theme` when
+the published site should open with a different initial docs theme. For a one-off
+build, pass `--theme`:
+
+```bash
+smdocs build . --theme linear
+```
+
+If a project has a publish root, `build` uses only that folder for static output while
+`run` still shows the whole docs tree:
+
+```yaml
+docs_dir: docs
+publish:
+  root: published
+  out_dir: site
+  theme: linear
+```
+
+With this config, `smdocs run .` serves `docs/`, but `smdocs build .` publishes only
+`docs/published/` with `linear` as the initial published theme. Use
+`smdocs build . --all` to build the full `docs/` tree instead.
+
 ## Config
 
 ```yaml
@@ -62,6 +90,10 @@ site_name: "Path A"
 site_key: docs
 docs_dir: docs
 theme: default
+publish:
+  root: published
+  out_dir: site
+  theme: linear
 nav:
   ignore:
     - "**/assets/**"

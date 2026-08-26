@@ -7,7 +7,6 @@ import {
     ChevronRight,
     Circle,
     Code2,
-    Command as CommandIcon,
     Copy,
     Eye,
     FileText,
@@ -15,7 +14,6 @@ import {
     FolderPlus,
     Inbox,
     Layout,
-    Link as LinkIcon,
     Loader2,
     MessageSquareText,
     Maximize2,
@@ -50,16 +48,6 @@ import {
     AccordionItem,
     AccordionTrigger,
 } from "@/components/ui/accordion";
-import {
-    CommandDialog,
-    CommandEmpty,
-    CommandGroup,
-    CommandInput,
-    CommandItem,
-    CommandList,
-    CommandSeparator,
-    CommandShortcut,
-} from "@/components/ui/command";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import {
@@ -114,6 +102,9 @@ import "katex/dist/katex.min.css";
 import { toast } from "sonner";
 
 type Theme = "dark" | "light";
+
+const ActionCommandDialog = React.lazy(() => import("@/components/ActionCommandDialog"));
+const DOCS_THEME_STORAGE_KEY = "smooth-docs-docs-theme";
 
 type RouteState = {
     site: SiteKey;
@@ -350,6 +341,7 @@ type DocsThemeOption = {
     title: string;
     extends?: string;
     requiresRestart: boolean;
+    cssPath?: string | null;
 };
 
 type DocsThemeSettingsState = {
@@ -396,6 +388,35 @@ const PIN_STORAGE_KEY = "smooth-docs-kit-pin-blocks";
 const UI_SETTINGS_STORAGE_KEY = "smooth-docs-kit-ui-settings";
 const READ_PAGES_STORAGE_PREFIX = "smooth-docs-kit-read-pages";
 const DOCS_DRAG_MIME = "application/x-smooth-docs-source-paths";
+const MERMAID_COPY_BUTTON_CLASS = "docs-mermaid-copy-image";
+const MERMAID_COPY_ICON =
+    '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+const MERMAID_EXPORT_BASE_COLOR_VARS = [
+    "--bg",
+    "--fg",
+    "--line",
+    "--accent",
+    "--muted",
+    "--surface",
+    "--border",
+] as const;
+const MERMAID_EXPORT_DERIVED_COLOR_VARS = [
+    "--_text",
+    "--_text-sec",
+    "--_text-muted",
+    "--_text-faint",
+    "--_line",
+    "--_arrow",
+    "--_node-fill",
+    "--_node-stroke",
+    "--_group-fill",
+    "--_group-hdr",
+    "--_inner-stroke",
+    "--_key-badge",
+    "--beautiful-mermaid-autonumber-bg",
+    "--beautiful-mermaid-autonumber-border",
+    "--beautiful-mermaid-autonumber-text",
+] as const;
 const PIN_FONT_STEP_KEY = "smooth-docs-kit-pin-font-step";
 const PIN_PANEL_WIDTH_KEY = "smooth-docs-kit-pin-panel-width";
 const LEFT_SIDEBAR_WIDTH_KEY = "smooth-docs-kit-left-sidebar-width";
@@ -573,6 +594,7 @@ export function App() {
     const [pinnedBlocks, setPinnedBlocks] = React.useState<PinnedBlock[]>(() =>
         readPinnedBlocks(pinPageKey),
     );
+    const [codexChatOpen, setCodexChatOpen] = React.useState(false);
     const [codexContextBlocks, setCodexContextBlocks] = React.useState<CodexContextBlock[]>([]);
     const [pinMenu, setPinMenu] = React.useState<PinMenuRequest | null>(null);
     const [docsEntryMenu, setDocsEntryMenu] =
@@ -615,11 +637,18 @@ export function App() {
         [currentPage, docsData.nav, route.site],
     );
     const hasPinnedBlocks = pinnedBlocks.length > 0;
-    const hasSidePanel = hasPinnedBlocks || tableOfContents.length > 0;
+    const hasDocsSidePanel = hasPinnedBlocks || tableOfContents.length > 0;
+    const codexChatSidebarOpen = import.meta.env.DEV && codexChatOpen;
+    const canSwitchDocsTheme = true;
     const canEditMarkdown =
-        currentPage.kind === "page" && isDocsMarkdownSourcePath(currentPage.sourcePath);
-    const canRenderSidePanel = !zenMode && !editMode && hasSidePanel;
-    const rightSidebarOpen = canRenderSidePanel && uiSettings.showRightSidebar;
+        import.meta.env.DEV &&
+        currentPage.kind === "page" &&
+        isDocsMarkdownSourcePath(currentPage.sourcePath);
+    const canCopyCurrentPagePath =
+        import.meta.env.DEV && currentPage.absolutePath.trim().length > 0;
+    const canRenderDocsSidePanel = !zenMode && !editMode && hasDocsSidePanel;
+    const rightSidebarOpen = canRenderDocsSidePanel && uiSettings.showRightSidebar;
+    const rightPanelOpen = codexChatSidebarOpen || rightSidebarOpen;
 
     React.useEffect(() => {
         setPinnedBlocks(readPinnedBlocks(pinPageKey));
@@ -693,14 +722,18 @@ export function App() {
         setDocsThemeState((current) => ({ ...current, loading: true, error: "" }));
 
         try {
-            const response = await fetch("/__smooth-docs/themes", { method: "GET" });
+            const response = import.meta.env.DEV
+                ? await fetch("/__smooth-docs/themes", { method: "GET" })
+                : await fetch("/theme/themes.json", { method: "GET" });
             const data = (await response.json().catch(() => ({}))) as DocsThemeSettingsPayload;
 
             if (response.status === 404) {
                 setDocsThemeState((current) => ({
                     ...current,
                     loading: false,
-                    error: "Theme switching is unavailable in this server.",
+                    error: import.meta.env.DEV
+                        ? "Theme switching is unavailable in this server."
+                        : "No static theme manifest was found.",
                 }));
                 return;
             }
@@ -709,10 +742,21 @@ export function App() {
                 throw new Error(data.error ?? "Failed to load themes");
             }
 
+            const themes = data.themes ?? [];
+            const currentTheme = import.meta.env.DEV
+                ? data.currentTheme
+                : getInitialStaticDocsThemeName(themes, data.currentTheme);
+
+            if (import.meta.env.DEV) {
+                resetDocsThemeStylesheetToProjectTheme();
+            } else if (currentTheme) {
+                applyStaticDocsTheme(currentTheme, themes, { persist: false });
+            }
+
             setDocsThemeState((current) => ({
                 ...current,
-                currentTheme: data.currentTheme ?? current.currentTheme,
-                themes: data.themes ?? current.themes,
+                currentTheme: currentTheme ?? current.currentTheme,
+                themes,
                 loading: false,
                 error: "",
             }));
@@ -733,6 +777,24 @@ export function App() {
     const changeDocsTheme = React.useCallback(
         async (themeName: string) => {
             if (!themeName || docsThemeState.applying) return;
+
+            if (!import.meta.env.DEV) {
+                const applied = applyStaticDocsTheme(themeName, docsThemeState.themes);
+                if (!applied) {
+                    const message = "This docs theme cannot be switched in the static site.";
+                    setDocsThemeState((current) => ({ ...current, error: message }));
+                    toast.error("Theme change failed.", { description: message });
+                    return;
+                }
+
+                setDocsThemeState((current) => ({
+                    ...current,
+                    currentTheme: themeName,
+                    error: "",
+                }));
+                toast.success("Docs theme changed.");
+                return;
+            }
 
             setDocsThemeState((current) => ({
                 ...current,
@@ -786,7 +848,11 @@ export function App() {
                 });
             }
         },
-        [applyDocsContentUpdate, docsThemeState.applying],
+        [
+            applyDocsContentUpdate,
+            docsThemeState.applying,
+            docsThemeState.themes,
+        ],
     );
 
     React.useEffect(() => {
@@ -874,6 +940,8 @@ export function App() {
             sourcePath: string,
             modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
         ) => {
+            if (!import.meta.env.DEV) return;
+
             const commandKey = Boolean(modifiers.metaKey || modifiers.ctrlKey);
             const shiftKey = Boolean(modifiers.shiftKey);
 
@@ -909,6 +977,8 @@ export function App() {
 
     const getDragSourcePaths = React.useCallback(
         (sourcePath: string) => {
+            if (!import.meta.env.DEV) return [sourcePath];
+
             if (selectedSourcePaths.has(sourcePath)) return [...selectedSourcePaths];
 
             setSelectedSourcePaths(new Set([sourcePath]));
@@ -920,7 +990,7 @@ export function App() {
 
     const moveMarkdownFiles = React.useCallback(
         async (sourcePaths: string[], destinationFolder: string) => {
-            if (sourcePaths.length === 0) return;
+            if (!import.meta.env.DEV || sourcePaths.length === 0) return;
 
             try {
                 const response = await fetch("/__smooth-docs/move-markdown", {
@@ -973,11 +1043,18 @@ export function App() {
                 });
             }
         },
-        [applyDocsContentUpdate, currentPage.sourcePath, navigateTo, route.site],
+        [
+            applyDocsContentUpdate,
+            currentPage.sourcePath,
+            navigateTo,
+            route.site,
+        ],
     );
 
     const createDocsEntry = React.useCallback(
         async (kind: "file" | "folder", folderPath = "", name = "") => {
+            if (!import.meta.env.DEV) return false;
+
             try {
                 const response = await fetch("/__smooth-docs/create-docs-entry", {
                     method: "POST",
@@ -1029,6 +1106,8 @@ export function App() {
 
     const openDocsEntryContextMenu = React.useCallback(
         (event: React.MouseEvent, target: DocsEntryTarget) => {
+            if (!import.meta.env.DEV) return;
+
             event.preventDefault();
             event.stopPropagation();
 
@@ -1078,6 +1157,8 @@ export function App() {
 
     const renameDocsEntry = React.useCallback(
         async (target: DocsEntryTarget, newName: string) => {
+            if (!import.meta.env.DEV) return;
+
             try {
                 const response = await fetch("/__smooth-docs/rename-docs-entry", {
                     method: "POST",
@@ -1123,11 +1204,18 @@ export function App() {
                 });
             }
         },
-        [applyDocsContentUpdate, currentPage.sourcePath, navigateTo, route.site],
+        [
+            applyDocsContentUpdate,
+            currentPage.sourcePath,
+            navigateTo,
+            route.site,
+        ],
     );
 
     const deleteDocsEntry = React.useCallback(
         async (target: DocsEntryTarget) => {
+            if (!import.meta.env.DEV) return;
+
             try {
                 const response = await fetch("/__smooth-docs/delete-docs-entry", {
                     method: "POST",
@@ -1179,7 +1267,12 @@ export function App() {
                 });
             }
         },
-        [applyDocsContentUpdate, currentPage.sourcePath, navigateTo, route.site],
+        [
+            applyDocsContentUpdate,
+            currentPage.sourcePath,
+            navigateTo,
+            route.site,
+        ],
     );
 
     const switchSite = React.useCallback(
@@ -1238,8 +1331,10 @@ export function App() {
     }, [currentPage.markdown]);
 
     const copyCurrentPagePath = React.useCallback(() => {
+        if (!canCopyCurrentPagePath) return;
+
         void copyWithToast(currentPage.absolutePath, "Copied page path.");
-    }, [currentPage.absolutePath]);
+    }, [canCopyCurrentPagePath, currentPage.absolutePath]);
 
     const copyCurrentUrl = React.useCallback(() => {
         void copyWithToast(location.href, "Copied current URL.");
@@ -1247,7 +1342,7 @@ export function App() {
 
     const saveEditorText = React.useCallback(
         async (markdown: string, options: { toastOnError?: boolean } = {}) => {
-            if (!canEditMarkdown) return false;
+            if (!import.meta.env.DEV || !canEditMarkdown) return false;
 
             const requestId = editorSaveRequestRef.current + 1;
             editorSaveRequestRef.current = requestId;
@@ -1306,6 +1401,8 @@ export function App() {
     }, [saveEditorText]);
 
     const regenerateDocsContent = React.useCallback(async () => {
+        if (!import.meta.env.DEV) return;
+
         const response = await fetch("/__smooth-docs/regenerate", {
             method: "POST",
         });
@@ -1324,7 +1421,7 @@ export function App() {
 
     const savePageTitle = React.useCallback(
         async (title: string) => {
-            if (!canEditMarkdown) return;
+            if (!import.meta.env.DEV || !canEditMarkdown) return;
 
             const normalizedTitle = normalizeMarkdownTitle(title);
             if (!normalizedTitle) {
@@ -1389,7 +1486,7 @@ export function App() {
     );
 
     const enterEditMode = React.useCallback(() => {
-        if (!canEditMarkdown) {
+        if (!import.meta.env.DEV || !canEditMarkdown) {
             toast.error("Current page is not a Markdown file.");
             return;
         }
@@ -1476,7 +1573,7 @@ export function App() {
     }, []);
 
     React.useEffect(() => {
-        if (!editMode || !canEditMarkdown) return;
+        if (!import.meta.env.DEV || !editMode || !canEditMarkdown) return;
 
         if (editorText === editorLastSavedTextRef.current) {
             setEditorSaveStatus("saved");
@@ -1503,6 +1600,8 @@ export function App() {
     }, [canEditMarkdown, editMode, editorText, saveEditorText]);
 
     React.useEffect(() => {
+        if (!import.meta.env.DEV) return;
+
         const onBeforeUnload = (event: BeforeUnloadEvent) => {
             if (!editMode) return;
             if (editorTextRef.current === editorLastSavedTextRef.current) return;
@@ -1555,6 +1654,8 @@ export function App() {
 
     const addCodexContextFromPinMenu = React.useCallback(
         (request: Pick<PinMenuRequest, "block" | "selectedMarkdown">) => {
+            if (!import.meta.env.DEV) return;
+
             const markdown = (request.selectedMarkdown ?? request.block?.markdown ?? "").trim();
             if (!markdown) {
                 showPinToast("No Markdown found for Codex context.");
@@ -1676,7 +1777,8 @@ export function App() {
 
             const plainPrimary = primary && !event.altKey && !event.shiftKey;
             const editableTarget = isEditableShortcutTarget(event.target);
-            const markdownEditorTarget = isMarkdownEditorShortcutTarget(event.target);
+            const markdownEditorTarget =
+                import.meta.env.DEV && isMarkdownEditorShortcutTarget(event.target);
 
             if (plainPrimary && code === "KeyK") {
                 if (markdownEditorTarget) {
@@ -1713,7 +1815,7 @@ export function App() {
                 return;
             }
 
-            if (plainPrimary && code === "KeyP") {
+            if (plainPrimary && code === "KeyP" && canCopyCurrentPagePath) {
                 event.preventDefault();
                 copyCurrentPagePath();
                 return;
@@ -1738,6 +1840,7 @@ export function App() {
         copyCurrentPageMarkdown,
         copyCurrentPagePath,
         copyCurrentUrl,
+        canCopyCurrentPagePath,
         switchToNextSite,
         toggleRightSidebar,
         toggleTheme,
@@ -1806,6 +1909,7 @@ export function App() {
 
     const pageActiveBar = !editMode ? (
         <ArticleActiveBar
+            canSwitchDocsTheme={canSwitchDocsTheme}
             docsTheme={docsThemeState.currentTheme}
             docsThemeApplying={docsThemeState.applying}
             docsThemeError={docsThemeState.error}
@@ -1822,7 +1926,7 @@ export function App() {
             onSettingsOpen={() => setSettingsOpen(true)}
             onThemeToggle={toggleTheme}
             onRightSidebarToggle={toggleRightSidebar}
-            rightSidebarAvailable={canRenderSidePanel}
+            rightSidebarAvailable={canRenderDocsSidePanel}
             rightSidebarOpen={rightSidebarOpen}
             theme={theme}
         />
@@ -1836,6 +1940,7 @@ export function App() {
             style={{ "--sidebar-width": `${leftSidebarWidth}px` } as React.CSSProperties}>
             {!zenMode && (
                 <DocsSidebar
+                    canManageDocs={import.meta.env.DEV}
                     currentPath={currentPage.url}
                     currentSourcePath={currentPage.sourcePath}
                     getDragSourcePaths={getDragSourcePaths}
@@ -1858,73 +1963,93 @@ export function App() {
                 />
             )}
 
-            <ActionCommandDialog
-                canEditMarkdown={canEditMarkdown}
-                docsData={docsData}
-                editMode={editMode}
-                onCopyMarkdown={copyCurrentPageMarkdown}
-                onCopyPath={copyCurrentPagePath}
-                onCopyUrl={copyCurrentUrl}
-                onCreateMarkdown={() => {
-                    void createDocsEntry("file", "");
-                }}
-                onPromoteDraft={() => setPromoteDraftOpen(true)}
-                onDeleteMarkdown={() => setDeleteMarkdownOpen(true)}
-                onNavigate={navigateTo}
-                onNextSite={switchToNextSite}
-                onOpenChange={setCommandOpen}
-                onSiteChange={switchSite}
-                onThemeChange={setTheme}
-                onToggleEditMode={toggleEditMode}
-                onZenModeToggle={toggleZenMode}
-                canPromoteDraft={
-                    availableSites.includes("published") &&
-                    route.site === "draft" &&
-                    currentPage.sourcePath.startsWith("draft/docs/")
-                }
-                canDeleteMarkdown={isDocsMarkdownSourcePath(currentPage.sourcePath)}
-                open={commandOpen}
-                site={route.site}
-                theme={theme}
-                zenMode={zenMode}
-            />
+            {commandOpen ? (
+                <React.Suspense fallback={null}>
+                    <ActionCommandDialog
+                        availableSites={availableSites}
+                        canCopyPath={canCopyCurrentPagePath}
+                        canCreateMarkdown={import.meta.env.DEV}
+                        canEditMarkdown={canEditMarkdown}
+                        docsData={docsData}
+                        editMode={editMode}
+                        getSiteLabel={getSiteLabel}
+                        onCopyMarkdown={copyCurrentPageMarkdown}
+                        onCopyPath={copyCurrentPagePath}
+                        onCopyUrl={copyCurrentUrl}
+                        onCreateMarkdown={() => {
+                            void createDocsEntry("file", "");
+                        }}
+                        onPromoteDraft={() => setPromoteDraftOpen(true)}
+                        onDeleteMarkdown={() => setDeleteMarkdownOpen(true)}
+                        onNavigate={navigateTo}
+                        onNextSite={switchToNextSite}
+                        onOpenChange={setCommandOpen}
+                        onSiteChange={switchSite}
+                        onThemeChange={setTheme}
+                        onToggleEditMode={toggleEditMode}
+                        onZenModeToggle={toggleZenMode}
+                        canPromoteDraft={
+                            import.meta.env.DEV &&
+                            availableSites.includes("published") &&
+                            route.site === "draft" &&
+                            currentPage.sourcePath.startsWith("draft/docs/")
+                        }
+                        canDeleteMarkdown={
+                            import.meta.env.DEV &&
+                            isDocsMarkdownSourcePath(currentPage.sourcePath)
+                        }
+                        open={commandOpen}
+                        site={route.site}
+                        theme={theme}
+                        zenMode={zenMode}
+                    />
+                </React.Suspense>
+            ) : null}
 
-            <PromoteDraftDialog
-                currentPage={currentPage}
-                open={promoteDraftOpen && route.site === "draft"}
-                onOpenChange={setPromoteDraftOpen}
-                onPromoted={(url, payload) => {
-                    applyDocsContentUpdate(payload);
-                    navigateTo(url, "published");
-                }}
-            />
+            {import.meta.env.DEV ? (
+                <>
+                    <PromoteDraftDialog
+                        currentPage={currentPage}
+                        open={promoteDraftOpen && route.site === "draft"}
+                        onOpenChange={setPromoteDraftOpen}
+                        onPromoted={(url, payload) => {
+                            applyDocsContentUpdate(payload);
+                            navigateTo(url, "published");
+                        }}
+                    />
 
-            <CreateMarkdownDialog
-                currentPage={currentPage}
-                initialFolderPath={createMarkdownFolderPath}
-                open={createMarkdownOpen}
-                onOpenChange={(open) => {
-                    setCreateMarkdownOpen(open);
-                    if (!open) setCreateMarkdownFolderPath(null);
-                }}
-                onCreated={(site, url, payload) => {
-                    applyDocsContentUpdate(payload);
-                    navigateTo(url, site);
-                }}
-                site={route.site}
-            />
+                    <CreateMarkdownDialog
+                        currentPage={currentPage}
+                        initialFolderPath={createMarkdownFolderPath}
+                        open={createMarkdownOpen}
+                        onOpenChange={(open) => {
+                            setCreateMarkdownOpen(open);
+                            if (!open) setCreateMarkdownFolderPath(null);
+                        }}
+                        onCreated={(site, url, payload) => {
+                            applyDocsContentUpdate(payload);
+                            navigateTo(url, site);
+                        }}
+                        site={route.site}
+                    />
 
-            <DeleteMarkdownDialog
-                currentPage={currentPage}
-                open={deleteMarkdownOpen && isDocsMarkdownSourcePath(currentPage.sourcePath)}
-                onOpenChange={setDeleteMarkdownOpen}
-                onDeleted={(site, payload) => {
-                    applyDocsContentUpdate(payload);
-                    navigateTo("/", site);
-                }}
-            />
+                    <DeleteMarkdownDialog
+                        currentPage={currentPage}
+                        open={
+                            deleteMarkdownOpen && isDocsMarkdownSourcePath(currentPage.sourcePath)
+                        }
+                        onOpenChange={setDeleteMarkdownOpen}
+                        onDeleted={(site, payload) => {
+                            applyDocsContentUpdate(payload);
+                            navigateTo("/", site);
+                        }}
+                    />
+                </>
+            ) : null}
 
             <DocsSettingsDialog
+                canSwitchDocsTheme={canSwitchDocsTheme}
+                canUseLocalDocsActions={import.meta.env.DEV}
                 leftSidebarWidth={leftSidebarWidth}
                 onLayoutWidthsReset={resetLayoutWidths}
                 onOpenChange={setSettingsOpen}
@@ -1966,6 +2091,7 @@ export function App() {
 
                             <div className='ml-auto flex shrink-0 items-center gap-1.5'>
                                 <PageHeaderActions
+                                    canCopyPath={canCopyCurrentPagePath}
                                     canEditMarkdown={canEditMarkdown}
                                     editMode={editMode}
                                     onEditModeToggle={toggleEditMode}
@@ -2020,8 +2146,8 @@ export function App() {
                             `docs-code-theme-${uiSettings.codeTheme}`,
                             uiSettings.codeWrap && "docs-code-wrap",
                             uiSettings.editorWrap && "docs-editor-wrap",
-                            canRenderSidePanel && "lg:flex-row lg:items-start",
-                            rightSidebarOpen && "gap-8",
+                            rightPanelOpen && "lg:flex-row lg:items-start",
+                            rightPanelOpen && "gap-8",
                         )}>
                         <div className='min-w-0 flex-1 py-8'>
                             <div
@@ -2034,7 +2160,7 @@ export function App() {
                                     page={currentPage}
                                     title={pageTitleDraft || currentPage.title}
                                 />
-                                {editMode ? (
+                                {import.meta.env.DEV && editMode ? (
                                     <MarkdownEditor
                                         key={`${route.site}-${currentPage.url}-editor`}
                                         fontSize={uiSettings.editorFontSize}
@@ -2049,6 +2175,7 @@ export function App() {
                                     />
                                 ) : currentPage.kind === "inbox" && currentPage.inbox ? (
                                     <InboxPage
+                                        canManageDocs={import.meta.env.DEV}
                                         key={`${route.site}-${currentPage.url}-inbox`}
                                         getDragSourcePaths={getDragSourcePaths}
                                         onEntryContextMenu={openDocsEntryContextMenu}
@@ -2060,6 +2187,7 @@ export function App() {
                                     />
                                 ) : currentPage.kind === "folder" && currentPage.folder ? (
                                     <FolderPage
+                                        canManageDocs={import.meta.env.DEV}
                                         key={`${route.site}-${currentPage.url}-folder`}
                                         getDragSourcePaths={getDragSourcePaths}
                                         onCreateFile={(folderPath) => {
@@ -2083,7 +2211,24 @@ export function App() {
                             </div>
                         </div>
 
-                        {canRenderSidePanel && hasPinnedBlocks ? (
+                        {import.meta.env.DEV ? (
+                            <CodexChatWidget
+                                contextBlocks={codexContextBlocks}
+                                currentPage={currentPage}
+                                headerVisible={headerVisible}
+                                onContextBlockRemove={(id) =>
+                                    setCodexContextBlocks((current) =>
+                                        current.filter((block) => block.id !== id),
+                                    )
+                                }
+                                onContextBlocksClear={() => setCodexContextBlocks([])}
+                                onOpenChange={setCodexChatOpen}
+                                open={codexChatOpen}
+                                site={route.site}
+                            />
+                        ) : null}
+
+                        {!codexChatSidebarOpen && rightSidebarOpen && hasPinnedBlocks ? (
                             <PinnedBlocksPanel
                                 blocks={pinnedBlocks}
                                 fontStepIndex={pinFontStepIndex}
@@ -2096,7 +2241,7 @@ export function App() {
                                 wrapText={uiSettings.pinPanelWrap}
                                 width={pinPanelWidth}
                             />
-                        ) : canRenderSidePanel ? (
+                        ) : !codexChatSidebarOpen && rightSidebarOpen ? (
                             <TableOfContents
                                 items={tableOfContents}
                                 headerVisible={headerVisible}
@@ -2112,9 +2257,10 @@ export function App() {
             </SidebarInset>
 
             <PinContextMenu
+                canAddContext={import.meta.env.DEV}
                 request={pinMenu}
                 onClose={closePinMenu}
-                onAddCodexContext={(request) => {
+                onAddContext={(request) => {
                     addCodexContextFromPinMenu(request);
                     setPinMenu(null);
                 }}
@@ -2128,75 +2274,66 @@ export function App() {
                     setPinMenu(null);
                 }}
             />
-            <DocsEntryContextMenu
-                request={docsEntryMenu}
-                onClose={() => setDocsEntryMenu(null)}
-                onCreateFile={(target) => {
-                    setDocsEntryMenu(null);
-                    createMarkdownFromTarget(target);
-                }}
-                onCreateFolder={(target) => {
-                    setDocsEntryMenu(null);
-                    createFolderFromTarget(target);
-                }}
-                onDelete={(target) => {
-                    setDocsEntryMenu(null);
-                    setDeleteTarget(target);
-                }}
-                onRename={(target) => {
-                    setDocsEntryMenu(null);
-                    setRenameTarget(target);
-                }}
-            />
-            <CreateFolderDialog
-                open={createFolderTarget !== null}
-                target={createFolderTarget}
-                onOpenChange={(open) => {
-                    if (!open) setCreateFolderTarget(null);
-                }}
-                onCreate={async (target, name) => {
-                    const created = await createDocsEntry(
-                        "folder",
-                        getCreateFolderPathForTarget(target, route.site),
-                        name,
-                    );
-                    if (created) setCreateFolderTarget(null);
-                }}
-            />
-            <RenameDocsEntryDialog
-                open={renameTarget !== null}
-                target={renameTarget}
-                onOpenChange={(open) => {
-                    if (!open) setRenameTarget(null);
-                }}
-                onRename={async (target, newName) => {
-                    await renameDocsEntry(target, newName);
-                    setRenameTarget(null);
-                }}
-            />
-            <DeleteDocsEntryDialog
-                open={deleteTarget !== null}
-                target={deleteTarget}
-                onOpenChange={(open) => {
-                    if (!open) setDeleteTarget(null);
-                }}
-                onDelete={async (target) => {
-                    await deleteDocsEntry(target);
-                    setDeleteTarget(null);
-                }}
-            />
-            {import.meta.hot ? (
-                <CodexChatWidget
-                    contextBlocks={codexContextBlocks}
-                    currentPage={currentPage}
-                    onContextBlockRemove={(id) =>
-                        setCodexContextBlocks((current) =>
-                            current.filter((block) => block.id !== id),
-                        )
-                    }
-                    onContextBlocksClear={() => setCodexContextBlocks([])}
-                    site={route.site}
-                />
+            {import.meta.env.DEV ? (
+                <>
+                    <DocsEntryContextMenu
+                        request={docsEntryMenu}
+                        onClose={() => setDocsEntryMenu(null)}
+                        onCreateFile={(target) => {
+                            setDocsEntryMenu(null);
+                            createMarkdownFromTarget(target);
+                        }}
+                        onCreateFolder={(target) => {
+                            setDocsEntryMenu(null);
+                            createFolderFromTarget(target);
+                        }}
+                        onDelete={(target) => {
+                            setDocsEntryMenu(null);
+                            setDeleteTarget(target);
+                        }}
+                        onRename={(target) => {
+                            setDocsEntryMenu(null);
+                            setRenameTarget(target);
+                        }}
+                    />
+                    <CreateFolderDialog
+                        open={createFolderTarget !== null}
+                        target={createFolderTarget}
+                        onOpenChange={(open) => {
+                            if (!open) setCreateFolderTarget(null);
+                        }}
+                        onCreate={async (target, name) => {
+                            const created = await createDocsEntry(
+                                "folder",
+                                getCreateFolderPathForTarget(target, route.site),
+                                name,
+                            );
+                            if (created) setCreateFolderTarget(null);
+                        }}
+                    />
+                    <RenameDocsEntryDialog
+                        open={renameTarget !== null}
+                        target={renameTarget}
+                        onOpenChange={(open) => {
+                            if (!open) setRenameTarget(null);
+                        }}
+                        onRename={async (target, newName) => {
+                            await renameDocsEntry(target, newName);
+                            setRenameTarget(null);
+                        }}
+                    />
+                    <DeleteDocsEntryDialog
+                        open={deleteTarget !== null}
+                        target={deleteTarget}
+                        onOpenChange={(open) => {
+                            if (!open) setDeleteTarget(null);
+                        }}
+                        onDelete={async (target) => {
+                            await deleteDocsEntry(target);
+                            setDeleteTarget(null);
+                        }}
+                    />
+                </>
             ) : null}
             <Toaster position='bottom-right' theme={theme} closeButton />
             <PinToast toast={pinToast} onDone={dismissPinToast} />
@@ -2630,13 +2767,15 @@ function PinnedBlocksPanel({
 }
 
 function PinContextMenu({
-    onAddCodexContext,
+    canAddContext,
+    onAddContext,
     onClose,
     onCopyMarkdown,
     onPin,
     request,
 }: {
-    onAddCodexContext: (request: Pick<PinMenuRequest, "block" | "selectedMarkdown">) => void;
+    canAddContext: boolean;
+    onAddContext: (request: Pick<PinMenuRequest, "block" | "selectedMarkdown">) => void;
     onClose: () => void;
     onCopyMarkdown: (markdown: string) => void;
     onPin: (block: NonNullable<PinMenuRequest["block"]>) => void;
@@ -2723,13 +2862,13 @@ function PinContextMenu({
                     <span className='min-w-0 truncate'>Pin block</span>
                 </button>
             )}
-            {(block?.markdown || selectedMarkdown) && (
+            {import.meta.env.DEV && canAddContext && (block?.markdown || selectedMarkdown) && (
                 <button
                     type='button'
                     className='docs-pin-context-menu-item'
                     role='menuitem'
                     onClick={() =>
-                        onAddCodexContext({
+                        onAddContext({
                             block,
                             selectedMarkdown,
                         })
@@ -3098,17 +3237,22 @@ function PinToast({ onDone, toast }: { onDone: () => void; toast: PinToastState 
 function CodexChatWidget({
     contextBlocks,
     currentPage,
+    headerVisible,
     onContextBlockRemove,
     onContextBlocksClear,
+    onOpenChange,
+    open,
     site,
 }: {
     contextBlocks: CodexContextBlock[];
     currentPage: DocPage;
+    headerVisible: boolean;
     onContextBlockRemove: (id: string) => void;
     onContextBlocksClear: () => void;
+    onOpenChange: (open: boolean) => void;
+    open: boolean;
     site: SiteKey;
 }) {
-    const [open, setOpen] = React.useState(false);
     const [draft, setDraft] = React.useState("");
     const [messages, setMessages] = React.useState<CodexChatMessage[]>([]);
     const [models, setModels] = React.useState<CodexModelOption[]>([]);
@@ -3502,7 +3646,7 @@ function CodexChatWidget({
 
     const onDraftKeyDown = React.useCallback(
         (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-            if (event.key !== "Enter" || event.shiftKey) return;
+            if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) return;
             event.preventDefault();
             void submit();
         },
@@ -3525,11 +3669,16 @@ function CodexChatWidget({
     const canSend = draft.trim().length > 0 && !sending && !status.running;
 
     return (
-        <div className='fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-3'>
-            {open && (
+        <>
+            {open ? (
                 <section
                     aria-label='Codex chat'
-                    className='flex h-[min(680px,calc(100vh-6rem))] w-[min(520px,calc(100vw-2rem))] flex-col overflow-hidden rounded-md border bg-background shadow-2xl'>
+                    className={cn(
+                        "relative z-50 order-first flex h-[min(760px,calc(100vh-6rem))] w-full flex-col overflow-hidden rounded-md border bg-background lg:order-none lg:w-[min(440px,38vw)] lg:min-w-[360px] lg:shrink-0 lg:rounded-none lg:border-y-0 lg:border-r-0 lg:shadow-none",
+                        headerVisible
+                            ? "lg:sticky lg:top-14 lg:h-[calc(100vh-3.5rem)]"
+                            : "lg:sticky lg:top-0 lg:h-screen",
+                    )}>
                     <div className='flex h-12 shrink-0 items-center gap-2 border-b px-3'>
                         <Bot className='h-4 w-4 text-muted-foreground' />
                         <div className='min-w-0 flex-1'>
@@ -3590,7 +3739,7 @@ function CodexChatWidget({
                                         variant='ghost'
                                         size='icon'
                                         className='h-8 w-8'
-                                        onClick={() => setOpen(false)}
+                                        onClick={() => onOpenChange(false)}
                                         aria-label='Close Codex chat'>
                                         <X className='h-3.5 w-3.5' />
                                     </Button>
@@ -3788,28 +3937,30 @@ function CodexChatWidget({
                         </div>
                     </div>
                 </section>
+            ) : (
+                <div className='fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-3'>
+                    <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    size='icon'
+                                    className='h-11 w-11 rounded-full shadow-lg'
+                                    onClick={() => onOpenChange(true)}
+                                    aria-label='Open Codex chat'>
+                                    {status.running ? (
+                                        <Loader2 className='h-5 w-5 animate-spin' />
+                                    ) : (
+                                        <MessageSquareText className='h-5 w-5' />
+                                    )}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side='left'>Codex</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
             )}
-
-            <TooltipProvider delayDuration={300}>
-                <Tooltip>
-                    <TooltipTrigger asChild>
-                        <Button
-                            type='button'
-                            size='icon'
-                            className='h-11 w-11 rounded-full shadow-lg'
-                            onClick={() => setOpen((value) => !value)}
-                            aria-label='Open Codex chat'>
-                            {status.running ? (
-                                <Loader2 className='h-5 w-5 animate-spin' />
-                            ) : (
-                                <MessageSquareText className='h-5 w-5' />
-                            )}
-                        </Button>
-                    </TooltipTrigger>
-                    <TooltipContent side='left'>Codex</TooltipContent>
-                </Tooltip>
-            </TooltipProvider>
-        </div>
+        </>
     );
 }
 
@@ -3834,178 +3985,6 @@ function ChatMarkdownMessage({ content }: { content: string }) {
     }, [content]);
 
     return <div className='docs-chat-markdown' dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
-function ActionCommandDialog({
-    canDeleteMarkdown,
-    canEditMarkdown,
-    canPromoteDraft,
-    docsData,
-    editMode,
-    onCopyMarkdown,
-    onCopyPath,
-    onCopyUrl,
-    onCreateMarkdown,
-    onDeleteMarkdown,
-    onNavigate,
-    onNextSite,
-    onOpenChange,
-    onPromoteDraft,
-    onSiteChange,
-    onThemeChange,
-    onToggleEditMode,
-    onZenModeToggle,
-    open,
-    site,
-    theme,
-    zenMode,
-}: {
-    canDeleteMarkdown: boolean;
-    canEditMarkdown: boolean;
-    canPromoteDraft: boolean;
-    docsData: DocsData;
-    editMode: boolean;
-    onCopyMarkdown: () => void;
-    onCopyPath: () => void;
-    onCopyUrl: () => void;
-    onCreateMarkdown: () => void;
-    onDeleteMarkdown: () => void;
-    onNavigate: (url: string) => void;
-    onNextSite: () => void;
-    onOpenChange: (open: boolean) => void;
-    onPromoteDraft: () => void;
-    onSiteChange: (site: SiteKey) => void;
-    onThemeChange: React.Dispatch<React.SetStateAction<Theme>>;
-    onToggleEditMode: () => void;
-    onZenModeToggle: () => void;
-    open: boolean;
-    site: SiteKey;
-    theme: Theme;
-    zenMode: boolean;
-}) {
-    const run = React.useCallback(
-        (action: () => void | Promise<void>) => {
-            onOpenChange(false);
-            void action();
-        },
-        [onOpenChange],
-    );
-
-    return (
-        <CommandDialog open={open} onOpenChange={onOpenChange} title='Smooth Docs actions'>
-            <CommandInput placeholder='Search docs or run an action...' />
-            <CommandList>
-                <CommandEmpty>No results found.</CommandEmpty>
-
-                <CommandGroup heading='Actions'>
-                    <CommandItem
-                        value='toggle zen mode focus'
-                        onSelect={() => run(onZenModeToggle)}>
-                        <Maximize2 className='h-4 w-4 text-muted-foreground' />
-                        <span>{zenMode ? "Exit zen mode" : "Enter zen mode"}</span>
-                        <CommandShortcut>Z</CommandShortcut>
-                    </CommandItem>
-                    {canEditMarkdown && (
-                        <CommandItem
-                            value='toggle edit mode markdown editor'
-                            onSelect={() => run(onToggleEditMode)}>
-                            <FileText className='h-4 w-4 text-muted-foreground' />
-                            <span>{editMode ? "Exit edit mode" : "Edit current Markdown"}</span>
-                        </CommandItem>
-                    )}
-                    <CommandItem
-                        value='create add new markdown file page'
-                        onSelect={() => run(onCreateMarkdown)}>
-                        <Plus className='h-4 w-4 text-muted-foreground' />
-                        <span>Create Markdown file</span>
-                    </CommandItem>
-                    <CommandItem
-                        value='copy markdown md source'
-                        onSelect={() => run(onCopyMarkdown)}>
-                        <FileText className='h-4 w-4 text-muted-foreground' />
-                        <span>Copy current page markdown</span>
-                        <CommandShortcut>⌘⌥M</CommandShortcut>
-                    </CommandItem>
-                    <CommandItem value='copy path source file' onSelect={() => run(onCopyPath)}>
-                        <Copy className='h-4 w-4 text-muted-foreground' />
-                        <span>Copy current page path</span>
-                        <CommandShortcut>⌘P</CommandShortcut>
-                    </CommandItem>
-                    <CommandItem value='copy url link' onSelect={() => run(onCopyUrl)}>
-                        <LinkIcon className='h-4 w-4 text-muted-foreground' />
-                        <span>Copy current URL</span>
-                        <CommandShortcut>⌘U</CommandShortcut>
-                    </CommandItem>
-                    <CommandItem
-                        value='toggle theme dark light'
-                        onSelect={() =>
-                            run(() =>
-                                onThemeChange((current) => (current === "dark" ? "light" : "dark")),
-                            )
-                        }>
-                        {theme === "dark" ? (
-                            <Sun className='h-4 w-4 text-muted-foreground' />
-                        ) : (
-                            <Moon className='h-4 w-4 text-muted-foreground' />
-                        )}
-                        <span>Switch to {theme === "dark" ? "light" : "dark"} theme</span>
-                        <CommandShortcut>⌘⌥L</CommandShortcut>
-                    </CommandItem>
-                    {availableSites.length > 1 && (
-                        <CommandItem value='switch next docs site' onSelect={() => run(onNextSite)}>
-                            <CommandIcon className='h-4 w-4 text-muted-foreground' />
-                            <span>Toggle docs site</span>
-                            <CommandShortcut>⌘⇧I</CommandShortcut>
-                        </CommandItem>
-                    )}
-                    {availableSites.map((targetSite) => (
-                        <CommandItem
-                            key={targetSite}
-                            value={`switch ${targetSite} ${getSiteLabel(targetSite)}`}
-                            onSelect={() => run(() => onSiteChange(targetSite))}>
-                            <CommandIcon className='h-4 w-4 text-muted-foreground' />
-                            <span>Open {getSiteLabel(targetSite)}</span>
-                        </CommandItem>
-                    ))}
-                    {canPromoteDraft && (
-                        <CommandItem
-                            value='copy publish current draft markdown published'
-                            onSelect={() => run(onPromoteDraft)}>
-                            <FileText className='h-4 w-4 text-muted-foreground' />
-                            <span>Publish current draft</span>
-                        </CommandItem>
-                    )}
-                    {canDeleteMarkdown && (
-                        <CommandItem
-                            value='delete current markdown md file'
-                            onSelect={() => run(onDeleteMarkdown)}>
-                            <Trash2 className='h-4 w-4 text-muted-foreground' />
-                            <span>Delete current Markdown</span>
-                        </CommandItem>
-                    )}
-                </CommandGroup>
-
-                <CommandSeparator />
-
-                <CommandGroup heading={`${getSiteLabel(site)} pages`}>
-                    {docsData.pages.map((page) => (
-                        <CommandItem
-                            key={page.url}
-                            value={`open ${page.title} ${page.sourcePath}`}
-                            onSelect={() => run(() => onNavigate(page.url))}>
-                            <BookOpen className='h-4 w-4 text-muted-foreground' />
-                            <div className='flex min-w-0 flex-col'>
-                                <span className='truncate'>{page.title}</span>
-                                <span className='truncate text-xs text-muted-foreground'>
-                                    {page.sourcePath}
-                                </span>
-                            </div>
-                        </CommandItem>
-                    ))}
-                </CommandGroup>
-            </CommandList>
-        </CommandDialog>
-    );
 }
 
 function CreateMarkdownDialog({
@@ -4574,6 +4553,8 @@ function DeleteMarkdownDialog({
 }
 
 function DocsSettingsDialog({
+    canSwitchDocsTheme,
+    canUseLocalDocsActions,
     docsTheme,
     docsThemeApplying,
     docsThemeError,
@@ -4595,6 +4576,8 @@ function DocsSettingsDialog({
     theme,
     tocPanelWidth,
 }: {
+    canSwitchDocsTheme: boolean;
+    canUseLocalDocsActions: boolean;
     docsTheme: string;
     docsThemeApplying: boolean;
     docsThemeError: string;
@@ -4623,9 +4606,11 @@ function DocsSettingsDialog({
         ? docsThemeError
         : docsThemeApplying
           ? "Applying the selected docs theme."
-          : docsThemeLoading
-            ? "Loading installed docs themes."
-            : "Choose the Smooth Docs theme written to the project config.";
+            : docsThemeLoading
+              ? "Loading installed docs themes."
+              : import.meta.env.DEV && canUseLocalDocsActions
+                ? "Choose the Smooth Docs theme written to the project config."
+                : "Choose a Smooth Docs theme bundled into this static site.";
     const selectedDocsTheme = docsTheme || docsThemeOptions[0]?.name || "";
 
     const setSetting = React.useCallback(
@@ -4644,9 +4629,17 @@ function DocsSettingsDialog({
         { id: "layout", label: "Layout", icon: Layout },
         { id: "sidebar", label: "Sidebars", icon: PanelRight },
         { id: "code", label: "Code blocks", icon: Code2 },
-        { id: "editor", label: "Editor", icon: Type },
+        ...(import.meta.env.DEV && canUseLocalDocsActions
+            ? [{ id: "editor" as const, label: "Editor", icon: Type }]
+            : []),
         { id: "diagrams", label: "Diagrams", icon: Maximize2 },
     ];
+
+    React.useEffect(() => {
+        if ((!import.meta.env.DEV || !canUseLocalDocsActions) && activeSection === "editor") {
+            setActiveSection("general");
+        }
+    }, [activeSection, canUseLocalDocsActions]);
 
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
@@ -4698,41 +4691,55 @@ function DocsSettingsDialog({
                     <div className='mb-10'>
                         <h2 className='text-3xl font-semibold tracking-normal'>Settings</h2>
                         <p className='mt-2 text-sm text-muted-foreground'>
-                            Tune the docs UI for reading, navigation, editing, and code review.
+                            {import.meta.env.DEV && canUseLocalDocsActions
+                                ? "Tune the docs UI for reading, navigation, editing, and code review."
+                                : "Tune the docs UI for reading, navigation, and code review."}
                         </p>
                     </div>
 
                     {activeSection === "general" && (
                         <SettingsSection title='General'>
-                            <SettingRow title='Docs theme' description={docsThemeDescription}>
-                                {docsThemeOptions.length > 0 ? (
-                                    <Select
-                                        value={selectedDocsTheme}
-                                        onValueChange={onDocsThemeChange}
-                                        disabled={docsThemeLoading || docsThemeApplying}>
-                                        <SelectTrigger className='w-44'>
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            {docsThemeOptions.map((option) => (
-                                                <SelectItem key={option.name} value={option.name}>
-                                                    {option.title}
-                                                    {option.requiresRestart ? " (restart)" : ""}
-                                                </SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                ) : (
-                                    <Button
-                                        type='button'
-                                        variant='outline'
-                                        className='h-9'
-                                        disabled={docsThemeLoading}
-                                        onClick={onDocsThemesRefresh}>
-                                        Load themes
-                                    </Button>
-                                )}
-                            </SettingRow>
+                            {canSwitchDocsTheme && (
+                                <SettingRow title='Docs theme' description={docsThemeDescription}>
+                                    {docsThemeOptions.length > 0 ? (
+                                        <Select
+                                            value={selectedDocsTheme}
+                                            onValueChange={onDocsThemeChange}
+                                            disabled={docsThemeLoading || docsThemeApplying}>
+                                            <SelectTrigger className='w-44'>
+                                                <SelectValue />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {docsThemeOptions.map((option) => (
+                                                    <SelectItem
+                                                        key={option.name}
+                                                        disabled={
+                                                            option.requiresRestart &&
+                                                            !import.meta.env.DEV
+                                                        }
+                                                        value={option.name}>
+                                                        {option.title}
+                                                        {option.requiresRestart
+                                                            ? import.meta.env.DEV
+                                                                ? " (restart)"
+                                                                : " (unavailable)"
+                                                            : ""}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    ) : (
+                                        <Button
+                                            type='button'
+                                            variant='outline'
+                                            className='h-9'
+                                            disabled={docsThemeLoading}
+                                            onClick={onDocsThemesRefresh}>
+                                            Load themes
+                                        </Button>
+                                    )}
+                                </SettingRow>
+                            )}
                             <SettingRow
                                 title='Color mode'
                                 description='Choose the color theme used by the docs UI.'>
@@ -4965,7 +4972,7 @@ function DocsSettingsDialog({
                         </SettingsSection>
                     )}
 
-                    {activeSection === "editor" && (
+                    {import.meta.env.DEV && canUseLocalDocsActions && activeSection === "editor" && (
                         <SettingsSection title='Editor'>
                             <SettingRow
                                 title='Markdown editor font size'
@@ -5177,11 +5184,13 @@ function HeaderBreadcrumbs({
 }
 
 function PageHeaderActions({
+    canCopyPath,
     canEditMarkdown,
     editMode,
     onEditModeToggle,
     page,
 }: {
+    canCopyPath: boolean;
     canEditMarkdown: boolean;
     editMode: boolean;
     onEditModeToggle: () => void;
@@ -5190,7 +5199,7 @@ function PageHeaderActions({
     return (
         <TooltipProvider delayDuration={300}>
             <div className='flex shrink-0 items-center gap-1.5'>
-                {canEditMarkdown && (
+                {import.meta.env.DEV && canEditMarkdown && (
                     <Tooltip>
                         <TooltipTrigger asChild>
                             <Button
@@ -5232,13 +5241,15 @@ function PageHeaderActions({
                             <FileText className='h-3.5 w-3.5 text-muted-foreground' />
                             Markdown
                         </DropdownMenuItem>
-                        <DropdownMenuItem
-                            onSelect={() => {
-                                void copyWithToast(page.absolutePath, "Copied page path.");
-                            }}>
-                            <Folder className='h-3.5 w-3.5 text-muted-foreground' />
-                            Path
-                        </DropdownMenuItem>
+                        {import.meta.env.DEV && canCopyPath && (
+                            <DropdownMenuItem
+                                onSelect={() => {
+                                    void copyWithToast(page.absolutePath, "Copied page path.");
+                                }}>
+                                <Folder className='h-3.5 w-3.5 text-muted-foreground' />
+                                Path
+                            </DropdownMenuItem>
+                        )}
                     </DropdownMenuContent>
                 </DropdownMenu>
             </div>
@@ -5319,6 +5330,7 @@ function MarkdownEditor({
 }
 
 function InboxPage({
+    canManageDocs,
     getDragSourcePaths,
     onEntryContextMenu,
     onMarkRead,
@@ -5327,6 +5339,7 @@ function InboxPage({
     page,
     readPageUrls,
 }: {
+    canManageDocs: boolean;
     getDragSourcePaths: (sourcePath: string) => string[];
     onEntryContextMenu: (event: React.MouseEvent, target: DocsEntryTarget) => void;
     onMarkRead: (pagePaths: ReadonlyArray<string>) => void;
@@ -5579,7 +5592,7 @@ function InboxPage({
                                 return (
                                     <TableRow
                                         key={item.url}
-                                        draggable
+                                        draggable={canManageDocs}
                                         role='link'
                                         tabIndex={0}
                                         className={cn(
@@ -5587,15 +5600,20 @@ function InboxPage({
                                             isSelected && "bg-muted/40 hover:bg-muted/50",
                                         )}
                                         onClick={() => onNavigate(item.url)}
-                                        onContextMenu={(event) =>
-                                            onEntryContextMenu(event, {
-                                                title: item.title,
-                                                kind: "page",
-                                                url: item.url,
-                                                sourcePath: item.sourcePath,
-                                            })
+                                        onContextMenu={
+                                            canManageDocs
+                                                ? (event) =>
+                                                      onEntryContextMenu(event, {
+                                                          title: item.title,
+                                                          kind: "page",
+                                                          url: item.url,
+                                                          sourcePath: item.sourcePath,
+                                                      })
+                                                : undefined
                                         }
                                         onDragStart={(event) => {
+                                            if (!canManageDocs) return;
+
                                             const sourcePaths = getDragSourcePaths(item.sourcePath);
                                             writeDraggedSourcePaths(event, sourcePaths, {
                                                 sourceLabel: "Inbox",
@@ -5700,6 +5718,7 @@ function formatInboxDocumentCount(count: number) {
 }
 
 function FolderPage({
+    canManageDocs,
     getDragSourcePaths,
     onCreateFile,
     onCreateFolder,
@@ -5708,6 +5727,7 @@ function FolderPage({
     onNavigate,
     page,
 }: {
+    canManageDocs: boolean;
     getDragSourcePaths: (sourcePath: string) => string[];
     onCreateFile: (folderPath: string) => void;
     onCreateFolder: (target: DocsEntryTarget) => void;
@@ -5735,14 +5755,20 @@ function FolderPage({
     const isCurrentFolderDropTarget = dropTarget === folderPath;
     const handleCurrentFolderDragOver = React.useCallback(
         (event: React.DragEvent) => {
-            if (!isRootFolder || !event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+            if (
+                !canManageDocs ||
+                !isRootFolder ||
+                !event.dataTransfer.types.includes(DOCS_DRAG_MIME)
+            ) {
+                return;
+            }
 
             event.preventDefault();
             event.stopPropagation();
             event.dataTransfer.dropEffect = "move";
             setDropTarget(folderPath);
         },
-        [folderPath, isRootFolder],
+        [canManageDocs, folderPath, isRootFolder],
     );
     const handleCurrentFolderDragLeave = React.useCallback((event: React.DragEvent) => {
         const relatedTarget = event.relatedTarget;
@@ -5752,7 +5778,7 @@ function FolderPage({
     }, []);
     const handleCurrentFolderDrop = React.useCallback(
         (event: React.DragEvent) => {
-            if (!isRootFolder) return;
+            if (!canManageDocs || !isRootFolder) return;
 
             const sourcePaths = readDraggedSourcePaths(event);
             if (sourcePaths.length === 0) return;
@@ -5762,7 +5788,7 @@ function FolderPage({
             setDropTarget(null);
             onMoveMarkdown(sourcePaths, folderPath);
         },
-        [folderPath, isRootFolder, onMoveMarkdown],
+        [canManageDocs, folderPath, isRootFolder, onMoveMarkdown],
     );
 
     return (
@@ -5782,36 +5808,38 @@ function FolderPage({
                     </div>
                 </div>
                 <div className='flex shrink-0 items-center gap-1.5'>
-                    <TooltipProvider delayDuration={300}>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    type='button'
-                                    variant='outline'
-                                    size='icon'
-                                    className='h-8 w-8'
-                                    aria-label='Add file to folder'
-                                    onClick={() => onCreateFile(folderPath)}>
-                                    <Plus className='h-4 w-4' />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Add file</TooltipContent>
-                        </Tooltip>
-                        <Tooltip>
-                            <TooltipTrigger asChild>
-                                <Button
-                                    type='button'
-                                    variant='outline'
-                                    size='icon'
-                                    className='h-8 w-8'
-                                    aria-label='Add folder to folder'
-                                    onClick={() => onCreateFolder(folderTarget)}>
-                                    <FolderPlus className='h-4 w-4' />
-                                </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Add folder</TooltipContent>
-                        </Tooltip>
-                    </TooltipProvider>
+                    {import.meta.env.DEV && canManageDocs && (
+                        <TooltipProvider delayDuration={300}>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='outline'
+                                        size='icon'
+                                        className='h-8 w-8'
+                                        aria-label='Add file to folder'
+                                        onClick={() => onCreateFile(folderPath)}>
+                                        <Plus className='h-4 w-4' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Add file</TooltipContent>
+                            </Tooltip>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button
+                                        type='button'
+                                        variant='outline'
+                                        size='icon'
+                                        className='h-8 w-8'
+                                        aria-label='Add folder to folder'
+                                        onClick={() => onCreateFolder(folderTarget)}>
+                                        <FolderPlus className='h-4 w-4' />
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Add folder</TooltipContent>
+                            </Tooltip>
+                        </TooltipProvider>
+                    )}
                     <Badge variant='secondary' className='ml-1 w-fit'>
                         {items.length} items
                     </Badge>
@@ -5854,7 +5882,9 @@ function FolderPage({
                                 return (
                                     <TableRow
                                         key={`${item.kind}-${item.url}`}
-                                        draggable={!isFolder && Boolean(item.sourcePath)}
+                                        draggable={
+                                            canManageDocs && !isFolder && Boolean(item.sourcePath)
+                                        }
                                         role='link'
                                         tabIndex={0}
                                         className={cn(
@@ -5862,26 +5892,29 @@ function FolderPage({
                                             isDropTarget && "bg-muted/80",
                                         )}
                                         onClick={() => onNavigate(item.url)}
-                                        onContextMenu={(event) =>
-                                            onEntryContextMenu(
-                                                event,
-                                                isFolder
-                                                    ? {
-                                                          title: item.title,
-                                                          kind: "folder",
-                                                          url: item.url,
-                                                          folderPath: item.folderPath,
-                                                      }
-                                                    : {
-                                                          title: item.title,
-                                                          kind: "page",
-                                                          url: item.url,
-                                                          sourcePath: item.sourcePath,
-                                                      },
-                                            )
+                                        onContextMenu={
+                                            canManageDocs
+                                                ? (event) =>
+                                                      onEntryContextMenu(
+                                                          event,
+                                                          isFolder
+                                                              ? {
+                                                                    title: item.title,
+                                                                    kind: "folder",
+                                                                    url: item.url,
+                                                                    folderPath: item.folderPath,
+                                                                }
+                                                              : {
+                                                                    title: item.title,
+                                                                    kind: "page",
+                                                                    url: item.url,
+                                                                    sourcePath: item.sourcePath,
+                                                                },
+                                                      )
+                                                : undefined
                                         }
                                         onDragStart={(event) => {
-                                            if (!item.sourcePath) return;
+                                            if (!canManageDocs || !item.sourcePath) return;
                                             const sourcePaths = getDragSourcePaths(item.sourcePath);
                                             writeDraggedSourcePaths(event, sourcePaths, {
                                                 sourceLabel: "Folder",
@@ -5889,7 +5922,9 @@ function FolderPage({
                                             });
                                         }}
                                         onDragOver={(event) => {
-                                            if (!isFolder || !item.folderPath) return;
+                                            if (!canManageDocs || !isFolder || !item.folderPath) {
+                                                return;
+                                            }
                                             if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) {
                                                 return;
                                             }
@@ -5910,7 +5945,9 @@ function FolderPage({
                                             setDropTarget(null);
                                         }}
                                         onDrop={(event) => {
-                                            if (!isFolder || !item.folderPath) return;
+                                            if (!canManageDocs || !isFolder || !item.folderPath) {
+                                                return;
+                                            }
                                             const sourcePaths = readDraggedSourcePaths(event);
                                             if (sourcePaths.length === 0) return;
 
@@ -6065,11 +6102,37 @@ const Article = React.memo(function Article({
             mermaid.setAttribute("tabindex", "0");
             mermaid.setAttribute("aria-label", `Expand Mermaid diagram ${index + 1}`);
             mermaid.setAttribute("title", "Expand Mermaid diagram");
+
+            if (mermaid instanceof HTMLElement && !mermaid.querySelector(`.${MERMAID_COPY_BUTTON_CLASS}`)) {
+                mermaid.append(createMermaidCopyButton(index));
+            }
         });
 
         const onClick = (event: MouseEvent) => {
             const target = event.target;
             if (!(target instanceof Element)) return;
+
+            const mermaidCopyButton = target.closest(
+                `.${MERMAID_COPY_BUTTON_CLASS}`,
+            ) as HTMLButtonElement | null;
+            if (mermaidCopyButton && root.contains(mermaidCopyButton)) {
+                const mermaid = mermaidCopyButton.closest(".beautiful-mermaid, .mermaid");
+                if (!mermaid) return;
+
+                event.preventDefault();
+                event.stopPropagation();
+
+                void copyMermaidDiagramAsImage(mermaid).then((copied) => {
+                    if (!copied) return;
+
+                    mermaidCopyButton.dataset.copied = "true";
+
+                    window.setTimeout(() => {
+                        mermaidCopyButton.dataset.copied = "false";
+                    }, 1200);
+                });
+                return;
+            }
 
             const button = target.closest(".docs-code-copy") as HTMLButtonElement | null;
             if (button && root.contains(button)) {
@@ -6109,6 +6172,7 @@ const Article = React.memo(function Article({
 
             const target = event.target;
             if (!(target instanceof Element)) return;
+            if (target.closest(`.${MERMAID_COPY_BUTTON_CLASS}`)) return;
 
             const mermaid = target.closest(".beautiful-mermaid, .mermaid");
             if (!mermaid || !root.contains(mermaid) || !mermaid.querySelector("svg")) return;
@@ -6184,6 +6248,7 @@ const Article = React.memo(function Article({
 });
 
 function ArticleActiveBar({
+    canSwitchDocsTheme,
     docsTheme,
     docsThemeApplying,
     docsThemeError,
@@ -6204,6 +6269,7 @@ function ArticleActiveBar({
     rightSidebarOpen,
     theme,
 }: {
+    canSwitchDocsTheme: boolean;
     docsTheme: string;
     docsThemeApplying: boolean;
     docsThemeError: string;
@@ -6227,12 +6293,15 @@ function ArticleActiveBar({
     const [openMenu, setOpenMenu] = React.useState<"theme" | "width" | null>(null);
 
     React.useEffect(() => {
+        if (!canSwitchDocsTheme) return;
+
         if (docsThemeOptions.length > 0 || docsThemeLoading || docsThemeApplying || docsThemeError) {
             return;
         }
 
         onDocsThemesRefresh();
     }, [
+        canSwitchDocsTheme,
         docsThemeApplying,
         docsThemeError,
         docsThemeLoading,
@@ -6258,40 +6327,51 @@ function ArticleActiveBar({
             style={activeBarStyle}
             aria-label='Article controls'>
             <div className='docs-article-active-bar'>
-                {docsThemeOptions.length > 0 ? (
-                    <Select
-                        value={selectedDocsTheme}
-                        onOpenChange={(open) => updateOpenMenu("theme", open)}
-                        onValueChange={onDocsThemeChange}
-                        disabled={docsThemeApplying}>
-                        <SelectTrigger
-                            className='docs-active-bar-select w-40'
-                            aria-label='Docs theme'>
-                            <Palette className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            {docsThemeOptions.map((option) => (
-                                <SelectItem key={option.name} value={option.name}>
-                                    {option.title}
-                                    {option.requiresRestart ? " (restart)" : ""}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                ) : (
-                    <Button
-                        type='button'
-                        variant='ghost'
-                        size='icon'
-                        className='docs-active-bar-icon-button'
-                        aria-label='Load docs themes'
-                        title={docsThemeError || "Load docs themes"}
-                        disabled={docsThemeLoading}
-                        onClick={onDocsThemesRefresh}>
-                        <Palette className='h-3.5 w-3.5' />
-                    </Button>
-                )}
+                {canSwitchDocsTheme ? (
+                    docsThemeOptions.length > 0 ? (
+                        <Select
+                            value={selectedDocsTheme}
+                            onOpenChange={(open) => updateOpenMenu("theme", open)}
+                            onValueChange={onDocsThemeChange}
+                            disabled={docsThemeApplying}>
+                            <SelectTrigger
+                                className='docs-active-bar-select w-40'
+                                aria-label='Docs theme'>
+                                <Palette className='h-3.5 w-3.5 shrink-0 text-muted-foreground' />
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {docsThemeOptions.map((option) => (
+                                    <SelectItem
+                                        key={option.name}
+                                        disabled={
+                                            option.requiresRestart && !import.meta.env.DEV
+                                        }
+                                        value={option.name}>
+                                        {option.title}
+                                        {option.requiresRestart
+                                            ? import.meta.env.DEV
+                                                ? " (restart)"
+                                                : " (unavailable)"
+                                            : ""}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    ) : (
+                        <Button
+                            type='button'
+                            variant='ghost'
+                            size='icon'
+                            className='docs-active-bar-icon-button'
+                            aria-label='Load docs themes'
+                            title={docsThemeError || "Load docs themes"}
+                            disabled={docsThemeLoading}
+                            onClick={onDocsThemesRefresh}>
+                            <Palette className='h-3.5 w-3.5' />
+                        </Button>
+                    )
+                ) : null}
 
                 <Button
                     type='button'
@@ -6859,6 +6939,222 @@ function getSvgSize(svg: SVGElement): Size {
     };
 }
 
+function createMermaidCopyButton(index: number) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = MERMAID_COPY_BUTTON_CLASS;
+    button.innerHTML = MERMAID_COPY_ICON;
+    button.setAttribute("aria-label", `Copy Mermaid diagram ${index + 1} as image`);
+    button.setAttribute("title", "Copy as image");
+    return button;
+}
+
+async function copyMermaidDiagramAsImage(mermaid: Element) {
+    try {
+        const clipboard = getPngImageClipboard();
+        await clipboard.write([
+            new ClipboardItem({ "image/png": renderMermaidDiagramPng(mermaid) }),
+        ]);
+        toast.success("Copied Mermaid diagram as image.");
+        return true;
+    } catch (error) {
+        toast.error("Copy failed.", {
+            description: getMermaidCopyErrorDescription(error),
+        });
+        return false;
+    }
+}
+
+function getPngImageClipboard() {
+    const clipboard = navigator.clipboard;
+    if (!clipboard?.write || typeof ClipboardItem === "undefined") {
+        throw new Error("Image clipboard copy is not supported in this browser.");
+    }
+
+    if (typeof ClipboardItem.supports === "function" && !ClipboardItem.supports("image/png")) {
+        throw new Error("PNG clipboard copy is not supported in this browser.");
+    }
+
+    return clipboard;
+}
+
+async function renderMermaidDiagramPng(mermaid: Element) {
+    const svg = mermaid.querySelector("svg");
+    if (!(svg instanceof SVGElement)) {
+        throw new Error("Mermaid SVG was not found.");
+    }
+
+    const measured = getSvgSize(svg);
+    const size = {
+        width: Math.max(1, measured.width),
+        height: Math.max(1, measured.height),
+    };
+    const clone = cloneMermaidSvgForExport(svg, mermaid, size);
+    const image = await loadSvgImage(new XMLSerializer().serializeToString(clone));
+    const scale = clamp(window.devicePixelRatio || 1, 1, 2);
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.ceil(size.width * scale));
+    canvas.height = Math.max(1, Math.ceil(size.height * scale));
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+        throw new Error("Could not create a canvas for the Mermaid image.");
+    }
+
+    context.scale(scale, scale);
+    context.fillStyle = getMermaidCanvasBackground(mermaid);
+    context.fillRect(0, 0, size.width, size.height);
+    context.drawImage(image, 0, 0, size.width, size.height);
+
+    return canvasToPngBlob(canvas);
+}
+
+function cloneMermaidSvgForExport(svg: SVGElement, mermaid: Element, size: Size) {
+    const clone = svg.cloneNode(true) as SVGElement;
+    clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    clone.setAttribute("width", String(size.width));
+    clone.setAttribute("height", String(size.height));
+    inlineResolvedMermaidSvgColors(svg, clone, mermaid);
+    return clone;
+}
+
+function inlineResolvedMermaidSvgColors(sourceSvg: SVGElement, targetSvg: SVGElement, mermaid: Element) {
+    const mermaidStyle = getComputedStyle(mermaid);
+    const sourceStyle = getComputedStyle(sourceSvg);
+    const foreground = mermaidStyle.color || "rgb(0, 0, 0)";
+    const background = getMermaidCanvasBackground(mermaid);
+    const border = mermaidStyle.borderTopColor || foreground;
+    const baseFallbacks: Record<(typeof MERMAID_EXPORT_BASE_COLOR_VARS)[number], string> = {
+        "--bg": background,
+        "--fg": foreground,
+        "--line": border,
+        "--accent": foreground,
+        "--muted": foreground,
+        "--surface": background,
+        "--border": border,
+    };
+    const resolvedBaseVars = new Map<string, string>();
+
+    for (const name of MERMAID_EXPORT_BASE_COLOR_VARS) {
+        const rawValue = sourceStyle.getPropertyValue(name) || sourceSvg.style.getPropertyValue(name);
+        const color = resolveCssColorValue(mermaid, rawValue, baseFallbacks[name], resolvedBaseVars);
+        resolvedBaseVars.set(name, color);
+        targetSvg.style.setProperty(name, color);
+    }
+
+    for (const name of MERMAID_EXPORT_DERIVED_COLOR_VARS) {
+        const rawValue = sourceStyle.getPropertyValue(name) || sourceSvg.style.getPropertyValue(name);
+        const color = resolveCssColorValue(
+            mermaid,
+            rawValue,
+            getMermaidDerivedColorFallback(name, resolvedBaseVars),
+            resolvedBaseVars,
+        );
+        targetSvg.style.setProperty(name, color);
+    }
+}
+
+function resolveCssColorValue(
+    context: Element,
+    value: string,
+    fallback: string,
+    variables: ReadonlyMap<string, string>,
+) {
+    const colorValue = value.trim();
+    if (!colorValue) return fallback;
+
+    const host = context instanceof HTMLElement ? context : document.body;
+    const probe = document.createElement("span");
+    probe.style.position = "fixed";
+    probe.style.left = "-9999px";
+    probe.style.top = "0";
+    probe.style.visibility = "hidden";
+    probe.style.pointerEvents = "none";
+    for (const [name, variableValue] of variables) {
+        probe.style.setProperty(name, variableValue);
+    }
+
+    probe.style.color = colorValue;
+    if (!probe.style.color) return fallback;
+
+    host.appendChild(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved || fallback;
+}
+
+function getMermaidDerivedColorFallback(
+    name: (typeof MERMAID_EXPORT_DERIVED_COLOR_VARS)[number],
+    variables: ReadonlyMap<string, string>,
+) {
+    const foreground = variables.get("--fg") ?? "rgb(0, 0, 0)";
+    const background = variables.get("--bg") ?? "rgb(255, 255, 255)";
+    const line = variables.get("--line") ?? foreground;
+    const accent = variables.get("--accent") ?? foreground;
+    const surface = variables.get("--surface") ?? background;
+    const border = variables.get("--border") ?? line;
+
+    if (name === "--_line" || name === "--_inner-stroke") return line;
+    if (name === "--_arrow") return accent;
+    if (name === "--_node-fill" || name === "--_group-fill" || name === "--_group-hdr") {
+        return surface;
+    }
+    if (name === "--_node-stroke" || name === "--beautiful-mermaid-autonumber-border") {
+        return border;
+    }
+    if (name === "--_key-badge" || name === "--beautiful-mermaid-autonumber-bg") {
+        return background;
+    }
+    return foreground;
+}
+
+function getMermaidCanvasBackground(mermaid: Element) {
+    const background = getComputedStyle(mermaid).backgroundColor;
+    if (background && background !== "rgba(0, 0, 0, 0)" && background !== "transparent") {
+        return background;
+    }
+
+    const bodyBackground = getComputedStyle(document.body).backgroundColor;
+    return bodyBackground && bodyBackground !== "rgba(0, 0, 0, 0)" ? bodyBackground : "#ffffff";
+}
+
+function loadSvgImage(svg: string) {
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    const image = new Image();
+    image.decoding = "async";
+
+    return new Promise<HTMLImageElement>((resolve, reject) => {
+        image.onload = () => {
+            URL.revokeObjectURL(url);
+            resolve(image);
+        };
+        image.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error("Could not render the Mermaid SVG as an image."));
+        };
+        image.src = url;
+    });
+}
+
+function canvasToPngBlob(canvas: HTMLCanvasElement) {
+    return new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob((blob) => {
+            if (blob) {
+                resolve(blob);
+                return;
+            }
+
+            reject(new Error("Could not create a PNG image."));
+        }, "image/png");
+    });
+}
+
+function getMermaidCopyErrorDescription(error: unknown) {
+    return error instanceof Error && error.message
+        ? error.message
+        : "Clipboard permission was denied.";
+}
+
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
 }
@@ -6963,7 +7259,9 @@ function preparePinnedBlockHtml(html: string) {
     template.innerHTML = html;
 
     template.content
-        .querySelectorAll(".docs-code-copy, .md-clipboard, .md-code__copy, [data-clipboard-target]")
+        .querySelectorAll(
+            `.${MERMAID_COPY_BUTTON_CLASS}, .docs-code-copy, .md-clipboard, .md-code__copy, [data-clipboard-target]`,
+        )
         .forEach((element) => element.remove());
 
     template.content
@@ -7693,6 +7991,7 @@ function readDraggedSourcePaths(event: React.DragEvent) {
 }
 
 function DocsSidebar({
+    canManageDocs,
     currentPath,
     currentSourcePath,
     getDragSourcePaths,
@@ -7711,6 +8010,7 @@ function DocsSidebar({
     width,
     wrapText,
 }: {
+    canManageDocs: boolean;
     currentPath: string;
     currentSourcePath: string;
     getDragSourcePaths: (sourcePath: string) => string[];
@@ -7744,18 +8044,19 @@ function DocsSidebar({
     );
     const openRootContextMenu = React.useCallback(
         (event: React.MouseEvent) => {
+            if (!canManageDocs) return;
             onEntryContextMenu(event, rootTarget);
         },
-        [onEntryContextMenu, rootTarget],
+        [canManageDocs, onEntryContextMenu, rootTarget],
     );
     const handleRootDragOver = React.useCallback((event: React.DragEvent) => {
-        if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+        if (!canManageDocs || !event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
 
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer.dropEffect = "move";
         setIsRootDropTarget(true);
-    }, []);
+    }, [canManageDocs]);
     const handleRootDragLeave = React.useCallback((event: React.DragEvent) => {
         const relatedTarget = event.relatedTarget;
         if (relatedTarget instanceof Node && event.currentTarget.contains(relatedTarget)) return;
@@ -7764,6 +8065,8 @@ function DocsSidebar({
     }, []);
     const handleRootDrop = React.useCallback(
         (event: React.DragEvent) => {
+            if (!canManageDocs) return;
+
             const sourcePaths = readDraggedSourcePaths(event);
             if (sourcePaths.length === 0) return;
 
@@ -7772,7 +8075,7 @@ function DocsSidebar({
             setIsRootDropTarget(false);
             onMoveMarkdown(sourcePaths, "");
         },
-        [onMoveMarkdown],
+        [canManageDocs, onMoveMarkdown],
     );
 
     return (
@@ -7787,28 +8090,31 @@ function DocsSidebar({
                 <SidebarGroup>
                     <SidebarGroupLabel className='justify-between gap-2 pr-1'>
                         <span>Docs</span>
-                        <TooltipProvider delayDuration={300}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-6 w-6 text-sidebar-foreground/70 hover:text-sidebar-accent-foreground'
-                                        aria-label='Add Markdown file'
-                                        onClick={(event) => {
-                                            event.stopPropagation();
-                                            onCreateMarkdown();
-                                        }}>
-                                        <Plus className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side='right'>Add file</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
+                        {import.meta.env.DEV && canManageDocs && (
+                            <TooltipProvider delayDuration={300}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button
+                                            type='button'
+                                            variant='ghost'
+                                            size='icon'
+                                            className='h-6 w-6 text-sidebar-foreground/70 hover:text-sidebar-accent-foreground'
+                                            aria-label='Add Markdown file'
+                                            onClick={(event) => {
+                                                event.stopPropagation();
+                                                onCreateMarkdown();
+                                            }}>
+                                            <Plus className='h-3.5 w-3.5' />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side='right'>Add file</TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        )}
                     </SidebarGroupLabel>
                     <SidebarGroupContent>
                         <DocsSidebarNav
+                            canManageDocs={canManageDocs}
                             currentPath={currentPath}
                             currentSourcePath={currentSourcePath}
                             getDragSourcePaths={getDragSourcePaths}
@@ -7897,6 +8203,7 @@ function InboxUnreadBadge({ count }: { count: number }) {
 }
 
 function DocsSidebarNav({
+    canManageDocs,
     items,
     currentPath,
     currentSourcePath,
@@ -7910,6 +8217,7 @@ function DocsSidebarNav({
     selectedSourcePaths,
     wrapText,
 }: {
+    canManageDocs: boolean;
     items: NavItem[];
     currentPath: string;
     currentSourcePath: string;
@@ -7940,6 +8248,7 @@ function DocsSidebarNav({
         <SidebarMenu>
             {items.map((item) => (
                 <DocsSidebarNavItem
+                    canManageDocs={canManageDocs}
                     key={item.url}
                     currentPath={currentPath}
                     currentSourcePath={currentSourcePath}
@@ -7960,6 +8269,7 @@ function DocsSidebarNav({
 }
 
 function DocsSidebarNavItem({
+    canManageDocs,
     currentPath,
     currentSourcePath,
     getDragSourcePaths,
@@ -7973,6 +8283,7 @@ function DocsSidebarNavItem({
     selectedSourcePaths,
     wrapText,
 }: {
+    canManageDocs: boolean;
     currentPath: string;
     currentSourcePath: string;
     getDragSourcePaths: (sourcePath: string) => string[];
@@ -8019,36 +8330,38 @@ function DocsSidebarNavItem({
                 return;
             }
 
-            onPageSelect(item.sourcePath, {
-                metaKey: event.metaKey,
-                ctrlKey: event.ctrlKey,
-                shiftKey: event.shiftKey,
-            });
+            if (canManageDocs) {
+                onPageSelect(item.sourcePath, {
+                    metaKey: event.metaKey,
+                    ctrlKey: event.ctrlKey,
+                    shiftKey: event.shiftKey,
+                });
+            }
 
-            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+            if (canManageDocs && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
 
             onNavigate(item.url);
         },
-        [item.sourcePath, item.url, onNavigate, onPageSelect],
+        [canManageDocs, item.sourcePath, item.url, onNavigate, onPageSelect],
     );
 
     const handleDragStart = React.useCallback(
         (event: React.DragEvent<HTMLButtonElement>) => {
-            if (!item.sourcePath) return;
+            if (!canManageDocs || !item.sourcePath) return;
             writeDraggedSourcePaths(event, getDragSourcePaths(item.sourcePath), {
                 title: item.title,
             });
         },
-        [getDragSourcePaths, item.sourcePath, item.title],
+        [canManageDocs, getDragSourcePaths, item.sourcePath, item.title],
     );
 
     const handleFolderDragOver = React.useCallback((event: React.DragEvent) => {
-        if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+        if (!canManageDocs || !event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer.dropEffect = "move";
         setIsDropTarget(true);
-    }, []);
+    }, [canManageDocs]);
 
     const handleFolderDragLeave = React.useCallback((event: React.DragEvent) => {
         const relatedTarget = event.relatedTarget;
@@ -8058,6 +8371,8 @@ function DocsSidebarNavItem({
 
     const handleFolderDrop = React.useCallback(
         (event: React.DragEvent) => {
+            if (!canManageDocs) return;
+
             const sourcePaths = readDraggedSourcePaths(event);
             if (sourcePaths.length === 0) return;
 
@@ -8067,14 +8382,15 @@ function DocsSidebarNavItem({
             setOpen(true);
             onMoveMarkdown(sourcePaths, getNavFolderPath(item));
         },
-        [item, onMoveMarkdown],
+        [canManageDocs, item, onMoveMarkdown],
     );
 
     const handleContextMenu = React.useCallback(
         (event: React.MouseEvent) => {
+            if (!canManageDocs) return;
             onEntryContextMenu(event, getDocsEntryTargetFromNavItem(item));
         },
-        [item, onEntryContextMenu],
+        [canManageDocs, item, onEntryContextMenu],
     );
 
     if (!isFolder) {
@@ -8088,10 +8404,10 @@ function DocsSidebarNavItem({
                         isSelected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
                     )}
                     data-selected={isSelected ? "true" : undefined}
-                    draggable={Boolean(item.sourcePath)}
+                    draggable={canManageDocs && Boolean(item.sourcePath)}
                     isActive={isActive}
                     onClick={handlePageClick}
-                    onContextMenu={handleContextMenu}
+                    onContextMenu={canManageDocs ? handleContextMenu : undefined}
                     onDragStart={handleDragStart}>
                     <FileText className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
                     <span
@@ -8121,7 +8437,7 @@ function DocsSidebarNavItem({
                       ? handleFolderClick
                       : undefined
             }
-            onContextMenu={handleContextMenu}
+            onContextMenu={canManageDocs ? handleContextMenu : undefined}
             onDragLeave={handleFolderDragLeave}
             onDragOver={handleFolderDragOver}
             onDrop={handleFolderDrop}>
@@ -8173,6 +8489,7 @@ function DocsSidebarNavItem({
                         <SidebarMenuSub>
                             {item.children.map((child) => (
                                 <DocsSidebarSubItem
+                                    canManageDocs={canManageDocs}
                                     key={child.url}
                                     currentPath={currentPath}
                                     currentSourcePath={currentSourcePath}
@@ -8197,6 +8514,7 @@ function DocsSidebarNavItem({
 }
 
 function DocsSidebarSubItem({
+    canManageDocs,
     currentPath,
     currentSourcePath,
     getDragSourcePaths,
@@ -8210,6 +8528,7 @@ function DocsSidebarSubItem({
     selectedSourcePaths,
     wrapText,
 }: {
+    canManageDocs: boolean;
     currentPath: string;
     currentSourcePath: string;
     getDragSourcePaths: (sourcePath: string) => string[];
@@ -8256,36 +8575,38 @@ function DocsSidebarSubItem({
                 return;
             }
 
-            onPageSelect(item.sourcePath, {
-                metaKey: event.metaKey,
-                ctrlKey: event.ctrlKey,
-                shiftKey: event.shiftKey,
-            });
+            if (canManageDocs) {
+                onPageSelect(item.sourcePath, {
+                    metaKey: event.metaKey,
+                    ctrlKey: event.ctrlKey,
+                    shiftKey: event.shiftKey,
+                });
+            }
 
-            if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+            if (canManageDocs && (event.metaKey || event.ctrlKey || event.shiftKey)) return;
 
             onNavigate(item.url);
         },
-        [item.sourcePath, item.url, onNavigate, onPageSelect],
+        [canManageDocs, item.sourcePath, item.url, onNavigate, onPageSelect],
     );
 
     const handleDragStart = React.useCallback(
         (event: React.DragEvent<HTMLButtonElement>) => {
-            if (!item.sourcePath) return;
+            if (!canManageDocs || !item.sourcePath) return;
             writeDraggedSourcePaths(event, getDragSourcePaths(item.sourcePath), {
                 title: item.title,
             });
         },
-        [getDragSourcePaths, item.sourcePath, item.title],
+        [canManageDocs, getDragSourcePaths, item.sourcePath, item.title],
     );
 
     const handleFolderDragOver = React.useCallback((event: React.DragEvent) => {
-        if (!event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
+        if (!canManageDocs || !event.dataTransfer.types.includes(DOCS_DRAG_MIME)) return;
         event.preventDefault();
         event.stopPropagation();
         event.dataTransfer.dropEffect = "move";
         setIsDropTarget(true);
-    }, []);
+    }, [canManageDocs]);
 
     const handleFolderDragLeave = React.useCallback((event: React.DragEvent) => {
         const relatedTarget = event.relatedTarget;
@@ -8295,6 +8616,8 @@ function DocsSidebarSubItem({
 
     const handleFolderDrop = React.useCallback(
         (event: React.DragEvent) => {
+            if (!canManageDocs) return;
+
             const sourcePaths = readDraggedSourcePaths(event);
             if (sourcePaths.length === 0) return;
 
@@ -8304,14 +8627,15 @@ function DocsSidebarSubItem({
             setOpen(true);
             onMoveMarkdown(sourcePaths, getNavFolderPath(item));
         },
-        [item, onMoveMarkdown],
+        [canManageDocs, item, onMoveMarkdown],
     );
 
     const handleContextMenu = React.useCallback(
         (event: React.MouseEvent) => {
+            if (!canManageDocs) return;
             onEntryContextMenu(event, getDocsEntryTargetFromNavItem(item));
         },
-        [item, onEntryContextMenu],
+        [canManageDocs, item, onEntryContextMenu],
     );
 
     if (!isFolder) {
@@ -8325,10 +8649,10 @@ function DocsSidebarSubItem({
                         isSelected && "bg-sidebar-accent font-medium text-sidebar-accent-foreground",
                     )}
                     data-selected={isSelected ? "true" : undefined}
-                    draggable={Boolean(item.sourcePath)}
+                    draggable={canManageDocs && Boolean(item.sourcePath)}
                     isActive={isActive}
                     onClick={handlePageClick}
-                    onContextMenu={handleContextMenu}
+                    onContextMenu={canManageDocs ? handleContextMenu : undefined}
                     onDragStart={handleDragStart}>
                     <FileText className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
                     <span
@@ -8358,7 +8682,7 @@ function DocsSidebarSubItem({
                       ? handleFolderClick
                       : undefined
             }
-            onContextMenu={handleContextMenu}
+            onContextMenu={canManageDocs ? handleContextMenu : undefined}
             onDragLeave={handleFolderDragLeave}
             onDragOver={handleFolderDragOver}
             onDrop={handleFolderDrop}>
@@ -8410,6 +8734,7 @@ function DocsSidebarSubItem({
                         <SidebarMenuSub className='mx-2'>
                             {item.children.map((child) => (
                                 <DocsSidebarSubItem
+                                    canManageDocs={canManageDocs}
                                     key={child.url}
                                     currentPath={currentPath}
                                     currentSourcePath={currentSourcePath}
@@ -8489,15 +8814,102 @@ function decodePathname(pathname: string) {
 }
 
 function refreshThemeStylesheet(version: number) {
-    const link = document.querySelector<HTMLLinkElement>('link[rel="stylesheet"]');
+    const link = getDocsThemeStylesheetLink();
     if (!link) return;
 
     const href = link.getAttribute("href") ?? "";
     const url = new URL(href, location.origin);
-    if (url.pathname !== "/theme/theme.css") return;
+    if (!url.pathname.startsWith("/theme/") || !url.pathname.endsWith("/theme.css")) return;
 
     url.searchParams.set("v", String(version));
     link.href = `${url.pathname}${url.search}${url.hash}`;
+}
+
+function getInitialStaticDocsThemeName(
+    themes: DocsThemeOption[],
+    fallbackTheme?: string,
+): string | undefined {
+    const storedTheme = readStoredDocsThemeName();
+    const storedOption = storedTheme
+        ? themes.find(
+              (option) =>
+                  option.name === storedTheme && !option.requiresRestart && Boolean(option.cssPath),
+          )
+        : null;
+
+    if (storedOption) return storedOption.name;
+    if (storedTheme) removeStoredDocsThemeName();
+
+    const fallbackOption = fallbackTheme
+        ? themes.find(
+              (option) =>
+                  option.name === fallbackTheme &&
+                  !option.requiresRestart &&
+                  Boolean(option.cssPath),
+          )
+        : null;
+
+    return fallbackOption?.name ?? themes.find((option) => !option.requiresRestart)?.name;
+}
+
+function applyStaticDocsTheme(
+    themeName: string,
+    themes: DocsThemeOption[],
+    options: { persist?: boolean } = {},
+) {
+    const targetTheme = themes.find(
+        (option) => option.name === themeName && !option.requiresRestart && Boolean(option.cssPath),
+    );
+    if (!targetTheme?.cssPath) return false;
+
+    const link = getDocsThemeStylesheetLink();
+    if (!link) return false;
+
+    link.href = targetTheme.cssPath;
+
+    if (options.persist !== false) {
+        writeStoredDocsThemeName(targetTheme.name);
+    }
+
+    return true;
+}
+
+function resetDocsThemeStylesheetToProjectTheme() {
+    const link = getDocsThemeStylesheetLink();
+    if (link) link.href = "/theme/theme.css";
+    removeStoredDocsThemeName();
+}
+
+function getDocsThemeStylesheetLink() {
+    return (
+        document.querySelector<HTMLLinkElement>("#smooth-docs-theme-stylesheet") ??
+        document.querySelector<HTMLLinkElement>('link[href^="/theme/"][rel="stylesheet"]') ??
+        document.querySelector<HTMLLinkElement>('link[rel="stylesheet"]')
+    );
+}
+
+function readStoredDocsThemeName() {
+    try {
+        return localStorage.getItem(DOCS_THEME_STORAGE_KEY) || "";
+    } catch {
+        return "";
+    }
+}
+
+function writeStoredDocsThemeName(themeName: string) {
+    try {
+        localStorage.setItem(DOCS_THEME_STORAGE_KEY, themeName);
+    } catch {
+        // Ignore storage failures; the theme still applies for the current page.
+    }
+}
+
+function removeStoredDocsThemeName() {
+    try {
+        localStorage.removeItem(DOCS_THEME_STORAGE_KEY);
+    } catch {
+        // Ignore storage failures.
+    }
 }
 
 function getSiteLabel(site: SiteKey) {

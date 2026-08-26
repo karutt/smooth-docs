@@ -31,6 +31,11 @@ type DocsContentUpdatePayload = {
   refreshThemeStylesheet?: boolean;
 };
 
+type GeneratedDocsContent = {
+  docsDataBySite: AllDocsData;
+  generatedAt: number;
+};
+
 type DocsThemeOption = {
   name: string;
   title: string;
@@ -151,6 +156,48 @@ function generateDocsContent() {
   return readGeneratedDocsData();
 }
 
+async function generateDocsContentAsync() {
+  await runNodeScript(["scripts/generate-all-content.mjs", ...selectedSites()]);
+  return readGeneratedDocsData();
+}
+
+function runNodeScript(args: string[]) {
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn("node", args, {
+      cwd: __dirname,
+      stdio: "inherit",
+    });
+
+    child.on("error", reject);
+    child.on("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`Command failed: node ${args.join(" ")}`));
+      }
+    });
+  });
+}
+
+function createDocsContentGenerator() {
+  let pending: Promise<GeneratedDocsContent> | null = null;
+
+  return () => {
+    if (!pending) {
+      pending = Promise.resolve()
+        .then(async () => ({
+          docsDataBySite: await generateDocsContentAsync(),
+          generatedAt: Date.now(),
+        }))
+        .finally(() => {
+          pending = null;
+        });
+    }
+
+    return pending;
+  };
+}
+
 function readGeneratedDocsData(): AllDocsData {
   const generatedPath = path.join(docsConfig.generatedAllDir, "docs-data.ts");
   const generated = readFileSync(generatedPath, "utf8");
@@ -238,16 +285,38 @@ function docsContentPlugin(): Plugin {
         server.watcher.add(root);
       }
 
+      const generateDocsContentForServer = createDocsContentGenerator();
+      const folderCache = new Map<DocsSite, Promise<string[]>>();
       const silentDocsFiles = new Set<string>();
       let timer: NodeJS.Timeout | undefined;
       let pendingAction: WatchAction = { type: "ignore" };
       let pendingFile: string | undefined;
+      const readDocsFolders = (site: DocsSite) => {
+        const cached = folderCache.get(site);
+        if (cached) return cached;
+
+        const folders = collectFolders(docsRootForSite(site)).catch((error) => {
+          folderCache.delete(site);
+          throw error;
+        });
+        folderCache.set(site, folders);
+        return folders;
+      };
+      const invalidateDocsFolderCache = (site?: string) => {
+        if (site && allSites.includes(site as DocsSite)) {
+          folderCache.delete(site as DocsSite);
+          return;
+        }
+
+        folderCache.clear();
+      };
       const regenerate = (file: string) => {
         if (!isDocsFile(file)) return;
         if (silentDocsFiles.delete(path.resolve(file))) return;
         const action = classifyWatchAction(file);
         if (action.type === "ignore") return;
 
+        invalidateDocsFolderCache();
         clearTimeout(timer);
         pendingFile = file;
         pendingAction =
@@ -261,25 +330,27 @@ function docsContentPlugin(): Plugin {
                   action.refreshThemeStylesheet,
               };
         timer = setTimeout(() => {
-          try {
-            const actionToPublish = pendingAction;
-            const docsDataBySite = generateDocsContent();
-            if (actionToPublish.type === "full-reload") {
-              server.ws.send({ type: "full-reload" });
-            } else if (actionToPublish.type === "content") {
-              server.ws.send("smooth-docs:content-update", {
-                docsDataBySite,
-                generatedAt: Date.now(),
-                changedFile: pendingFile,
-                refreshThemeStylesheet: actionToPublish.refreshThemeStylesheet,
-              } satisfies DocsContentUpdatePayload);
+          void (async () => {
+            try {
+              const actionToPublish = pendingAction;
+              const content = await generateDocsContentForServer();
+              if (actionToPublish.type === "full-reload") {
+                server.ws.send({ type: "full-reload" });
+              } else if (actionToPublish.type === "content") {
+                server.ws.send("smooth-docs:content-update", {
+                  docsDataBySite: content.docsDataBySite,
+                  generatedAt: content.generatedAt,
+                  changedFile: pendingFile,
+                  refreshThemeStylesheet: actionToPublish.refreshThemeStylesheet,
+                } satisfies DocsContentUpdatePayload);
+              }
+            } catch (error) {
+              server.config.logger.error(String(error));
+            } finally {
+              pendingAction = { type: "ignore" };
+              pendingFile = undefined;
             }
-          } catch (error) {
-            server.config.logger.error(String(error));
-          } finally {
-            pendingAction = { type: "ignore" };
-            pendingFile = undefined;
-          }
+          })();
         }, 75);
       };
 
@@ -302,6 +373,9 @@ function docsContentPlugin(): Plugin {
         }
 
         void handleDocsActionRequest(req, res, {
+          generateDocsContent: generateDocsContentForServer,
+          invalidateDocsFolderCache,
+          listDocsFolders: readDocsFolders,
           markSilentDocsFile(file) {
             silentDocsFiles.add(path.resolve(file));
           },
@@ -816,6 +890,7 @@ const codexChatBridge = new CodexChatBridge({
 function resolveCodexCommand() {
   const configured = process.env.SMOOTH_DOCS_CODEX_BIN || process.env.CODEX_BIN || "";
   const executableName = process.platform === "win32" ? "codex.cmd" : "codex";
+  const appResourceDirs = getCodexAppResourceDirs();
   const pathCandidates = (process.env.PATH ?? "")
     .split(path.delimiter)
     .filter(Boolean)
@@ -824,12 +899,13 @@ function resolveCodexCommand() {
     ? [
         path.join(process.env.HOME, ".local", "bin", executableName),
         path.join(process.env.HOME, ".codex", "bin", executableName),
+        path.join(process.env.HOME, ".codex", "plugins", ".plugin-appserver", executableName),
       ]
     : [];
   const candidates = [
     configured,
     ...pathCandidates,
-    "/Applications/Codex.app/Contents/Resources/codex",
+    ...appResourceDirs.map((dir) => path.join(dir, executableName)),
     "/opt/homebrew/bin/codex",
     "/usr/local/bin/codex",
     ...homeCandidates,
@@ -842,7 +918,7 @@ function getCodexProcessEnv(command: string) {
   const commandDir = path.dirname(command);
   const extraPathEntries = [
     commandDir,
-    "/Applications/Codex.app/Contents/Resources",
+    ...getCodexAppResourceDirs(),
     "/opt/homebrew/bin",
     "/usr/local/bin",
   ];
@@ -851,6 +927,23 @@ function getCodexProcessEnv(command: string) {
     ...process.env,
     PATH: [...extraPathEntries, process.env.PATH].filter(Boolean).join(path.delimiter),
   };
+}
+
+function getCodexAppResourceDirs() {
+  if (process.platform !== "darwin") return [];
+
+  const homeApplications = process.env.HOME
+    ? [
+        path.join(process.env.HOME, "Applications", "ChatGPT.app", "Contents", "Resources"),
+        path.join(process.env.HOME, "Applications", "Codex.app", "Contents", "Resources"),
+      ]
+    : [];
+
+  return [
+    "/Applications/ChatGPT.app/Contents/Resources",
+    "/Applications/Codex.app/Contents/Resources",
+    ...homeApplications,
+  ];
 }
 
 function buildCodexChatPrompt(request: CodexChatMessageRequest) {
@@ -1045,6 +1138,9 @@ async function handleDocsActionRequest(
   req: IncomingMessage,
   res: ServerResponse,
   actions: {
+    generateDocsContent: () => Promise<GeneratedDocsContent>;
+    invalidateDocsFolderCache: (site?: string) => void;
+    listDocsFolders: (site: DocsSite) => Promise<string[]>;
     markSilentDocsFile: (file: string) => void;
   },
 ) {
@@ -1068,7 +1164,7 @@ async function handleDocsActionRequest(
     }
 
     const query = normalizeDocsRelativePath(url.searchParams.get("query") ?? "");
-    const folders = await listDocsFolders(site as DocsSite, query);
+    const folders = await listDocsFolders(site as DocsSite, query, actions.listDocsFolders);
     sendJson(res, 200, { folders });
     return;
   }
@@ -1083,13 +1179,17 @@ async function handleDocsActionRequest(
     const sourcePath = typeof body.sourcePath === "string" ? body.sourcePath : "";
     const destinationPath =
       typeof body.destinationPath === "string" ? body.destinationPath : "";
-    const result = await promoteDraftMarkdown(sourcePath, destinationPath);
-    const docsDataBySite = generateDocsContent();
+    const result = await promoteDraftMarkdown(
+      sourcePath,
+      destinationPath,
+      actions.markSilentDocsFile,
+    );
+    actions.invalidateDocsFolderCache(result.site);
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1104,12 +1204,12 @@ async function handleDocsActionRequest(
     const site = typeof body.site === "string" ? body.site : "";
     const filePath = typeof body.filePath === "string" ? body.filePath : "";
     const result = await createMarkdownFile(site, filePath, actions.markSilentDocsFile);
-    const docsDataBySite = generateDocsContent();
+    actions.invalidateDocsFolderCache(result.site);
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1126,12 +1226,12 @@ async function handleDocsActionRequest(
     const folderPath = typeof body.folderPath === "string" ? body.folderPath : "";
     const name = typeof body.name === "string" ? body.name : "";
     const result = await createDocsEntry(site, kind, folderPath, name, actions.markSilentDocsFile);
-    const docsDataBySite = generateDocsContent();
+    actions.invalidateDocsFolderCache(result.site);
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1157,11 +1257,10 @@ async function handleDocsActionRequest(
       return;
     }
 
-    const docsDataBySite = generateDocsContent();
+    const content = await actions.generateDocsContent();
     sendJson(res, 200, {
       ok: true,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1204,11 +1303,10 @@ async function handleDocsActionRequest(
       return;
     }
 
-    const docsDataBySite = generateDocsContent();
+    const content = await actions.generateDocsContent();
     sendJson(res, 200, {
       ...getThemeSettingsPayload(),
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
       refreshThemeStylesheet: true,
       requiresRestart: false,
     });
@@ -1224,12 +1322,11 @@ async function handleDocsActionRequest(
     const body = await readJsonBody(req);
     const sourcePath = typeof body.sourcePath === "string" ? body.sourcePath : "";
     const result = await deleteMarkdownFile(sourcePath, actions.markSilentDocsFile);
-    const docsDataBySite = generateDocsContent();
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1251,12 +1348,12 @@ async function handleDocsActionRequest(
       destinationFolder,
       actions.markSilentDocsFile,
     );
-    const docsDataBySite = generateDocsContent();
+    actions.invalidateDocsFolderCache(result.site);
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1279,12 +1376,12 @@ async function handleDocsActionRequest(
       newName,
       actions.markSilentDocsFile,
     );
-    const docsDataBySite = generateDocsContent();
+    actions.invalidateDocsFolderCache(result.site);
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1309,12 +1406,12 @@ async function handleDocsActionRequest(
       folderPath,
       actions.markSilentDocsFile,
     );
-    const docsDataBySite = generateDocsContent();
+    actions.invalidateDocsFolderCache(result.site);
+    const content = await actions.generateDocsContent();
 
     sendJson(res, 200, {
       ...result,
-      docsDataBySite,
-      generatedAt: Date.now(),
+      ...content,
     });
     return;
   }
@@ -1568,7 +1665,11 @@ function getThemeSettingsPayload() {
   };
 }
 
-async function promoteDraftMarkdown(sourcePath: string, destinationPath: string) {
+async function promoteDraftMarkdown(
+  sourcePath: string,
+  destinationPath: string,
+  markSilentDocsFile: (file: string) => void,
+) {
   if (!sourcePath.startsWith("draft/docs/") || !sourcePath.endsWith(".md")) {
     throw new Error("Current page is not a draft Markdown file");
   }
@@ -1596,11 +1697,13 @@ async function promoteDraftMarkdown(sourcePath: string, destinationPath: string)
   }
 
   await fs.mkdir(path.dirname(to), { recursive: true });
+  markSilentDocsFile(to);
   await fs.copyFile(from, to);
 
   return {
     sourcePath: `draft/docs/${sourceRelativePath}`,
     destinationPath: `published/docs/${destinationRelativePath}`,
+    site: "published",
     url: await toMarkdownRoute(publishedRoot, destinationRelativePath),
   };
 }
@@ -2085,9 +2188,13 @@ function replacePathPrefix(value: string, fromPrefix: string, toPrefix: string) 
     : `${toPrefix}/${value.slice(fromPrefix.length).replace(/^\/+/, "")}`;
 }
 
-async function listDocsFolders(site: DocsSite, query: string) {
+async function listDocsFolders(
+  site: DocsSite,
+  query: string,
+  readFolders?: (site: DocsSite) => Promise<string[]>,
+) {
   const root = docsRootForSite(site);
-  const folders = await collectFolders(root);
+  const folders = readFolders ? await readFolders(site) : await collectFolders(root);
   const normalizedQuery = query.toLowerCase();
 
   return folders
@@ -2325,6 +2432,43 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error;
 }
 
+function docsManualChunks(id: string) {
+  const normalized = id.replace(/\\/g, "/");
+  if (!normalized.includes("/node_modules/")) return undefined;
+
+  if (
+    normalized.includes("/node_modules/react/") ||
+    normalized.includes("/node_modules/react-dom/") ||
+    normalized.includes("/node_modules/scheduler/")
+  ) {
+    return "react-vendor";
+  }
+
+  if (normalized.includes("/node_modules/cmdk/")) {
+    return "command-vendor";
+  }
+
+  if (
+    normalized.includes("/node_modules/@radix-ui/") ||
+    normalized.includes("/node_modules/sonner/")
+  ) {
+    return "ui-vendor";
+  }
+
+  if (normalized.includes("/node_modules/lucide-react/")) {
+    return "icons";
+  }
+
+  if (
+    normalized.includes("/node_modules/highlight.js/") ||
+    normalized.includes("/node_modules/katex/")
+  ) {
+    return "rendering-vendor";
+  }
+
+  return "vendor";
+}
+
 export default defineConfig({
   plugins: [docsContentPlugin(), react()],
   resolve: {
@@ -2336,4 +2480,11 @@ export default defineConfig({
     },
   },
   publicDir: path.join(docsConfig.generatedAllDir, "public"),
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: docsManualChunks,
+      },
+    },
+  },
 });

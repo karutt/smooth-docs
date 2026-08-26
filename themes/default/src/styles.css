@@ -503,6 +503,11 @@
         line-height: 1.75;
     }
 
+    .docs-prose table {
+        font-size: var(--docs-article-small-font-size);
+        line-height: 1.6;
+    }
+
     .docs-prose > .contents > h2 {
         @apply mt-10 border-b pb-2;
         font-size: 1.5em;
@@ -911,6 +916,7 @@
         @apply my-6 overflow-x-auto rounded-md border bg-card p-4 transition-colors;
         padding: var(--docs-mermaid-padding, 1rem);
         background-color: hsl(var(--docs-mermaid-background));
+        position: relative;
     }
 
     .docs-prose .docs-math-block {
@@ -1052,6 +1058,22 @@
         --_text-muted: hsl(var(--foreground)) !important;
         --_text-faint: hsl(var(--foreground)) !important;
         @apply mx-auto h-auto max-w-full;
+    }
+
+    .docs-prose .docs-mermaid-copy-image {
+        @apply absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
+    }
+
+    .docs-prose .docs-mermaid-copy-image[data-copied="true"] {
+        @apply text-foreground;
+    }
+
+    .docs-prose .docs-mermaid-copy-image svg {
+        display: block;
+        height: 1rem;
+        margin: 0;
+        max-width: none;
+        width: 1rem;
     }
 
     .docs-prose .beautiful-mermaid--error {

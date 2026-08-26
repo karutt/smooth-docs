@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { loadSmoothDocsConfig } from "./config.mjs";
+import { listThemes, loadSmoothDocsConfig } from "./config.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -85,12 +85,55 @@ function parseRequestedSites() {
 }
 
 async function copyThemeAssets(targetDir) {
-  if (config.theme.publicDir) {
-    await fs.cp(config.theme.publicDir, targetDir, { recursive: true, force: true });
+  await copySingleThemeAssets(config.theme, targetDir);
+
+  const builtInThemes = listThemes(rootDir);
+  const themes = builtInThemes.some(
+    (theme) => path.resolve(theme.root) === path.resolve(config.theme.root),
+  )
+    ? builtInThemes
+    : [config.theme, ...builtInThemes.filter((theme) => theme.name !== config.theme.name)];
+  const currentSourceDir = path.resolve(config.theme.sourceDir);
+  const manifestThemes = [];
+
+  for (const theme of themes) {
+    const requiresRestart = path.resolve(theme.sourceDir) !== currentSourceDir;
+    const themeTargetDir = path.join(targetDir, theme.name);
+
+    if (!requiresRestart) {
+      await copySingleThemeAssets(theme, themeTargetDir);
+    }
+
+    manifestThemes.push({
+      name: theme.name,
+      title: theme.title,
+      extends: theme.extends,
+      requiresRestart,
+      cssPath: requiresRestart ? null : `/theme/${theme.name}/theme.css`,
+    });
   }
 
-  await copyFileOrEmpty(config.theme.cssFile, path.join(targetDir, "theme.css"));
-  await copyFileOrEmpty(config.theme.jsFile, path.join(targetDir, "theme.js"));
+  await fs.writeFile(
+    path.join(targetDir, "themes.json"),
+    `${JSON.stringify(
+      {
+        currentTheme: config.theme.name,
+        themes: manifestThemes,
+      },
+      null,
+      2,
+    )}\n`,
+    "utf8",
+  );
+}
+
+async function copySingleThemeAssets(theme, targetDir) {
+  if (theme.publicDir) {
+    await fs.cp(theme.publicDir, targetDir, { recursive: true, force: true });
+  }
+
+  await copyFileOrEmpty(theme.cssFile, path.join(targetDir, "theme.css"));
+  await copyFileOrEmpty(theme.jsFile, path.join(targetDir, "theme.js"));
 }
 
 async function copyFileOrEmpty(sourcePath, targetPath) {
