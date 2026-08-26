@@ -9,15 +9,32 @@ export type SmoothDocsTheme = {
   extends?: string;
 };
 
+export type SmoothDocsThemeConfig = {
+  name?: string;
+  path?: string;
+  extends?: string;
+};
+
+export type SmoothDocsPublishConfig = {
+  enabled: boolean;
+  outDir: string;
+  outDirPath: string;
+  root: string | null;
+  rootDir: string | null;
+  themeConfig: SmoothDocsThemeConfig | null;
+};
+
 export type SmoothDocsConfig = {
   kitRoot: string;
   projectDir: string;
   configPath: string | null;
+  configuredDocsDir: string;
   docsDir: string;
   siteKey: string;
   siteName: string;
   devPort: number;
   navIgnore: string[];
+  publish: SmoothDocsPublishConfig;
   generatedSiteDir: string;
   generatedAllDir: string;
   theme: SmoothDocsTheme;

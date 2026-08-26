@@ -20,7 +20,13 @@ export function loadSmoothDocsConfig(options = {}) {
   );
   const configPath = findConfigPath(projectDir);
   const rawConfig = configPath ? readConfigFile(configPath) : {};
-  const docsDir = path.resolve(projectDir, rawConfig.docs_dir ?? rawConfig.docsDir ?? "docs");
+  const configuredDocsDir = path.resolve(
+    projectDir,
+    rawConfig.docs_dir ?? rawConfig.docsDir ?? "docs",
+  );
+  const docsDir = process.env.SMOOTH_DOCS_DOCS_DIR
+    ? path.resolve(process.env.SMOOTH_DOCS_DOCS_DIR)
+    : configuredDocsDir;
   const siteKey = normalizeSiteKey(rawConfig.site_key ?? rawConfig.siteKey ?? defaultSiteKey);
   const siteName = String(rawConfig.site_name ?? rawConfig.siteName ?? path.basename(projectDir));
   const devPort = normalizeDevPort(
@@ -30,9 +36,13 @@ export function loadSmoothDocsConfig(options = {}) {
       rawConfig.docsPort ??
       rawConfig.port,
   );
-  const themeConfig = normalizeThemeConfig(rawConfig.theme);
-  const theme = resolveTheme({ kitRoot, projectDir, themeConfig });
   const navIgnore = normalizeNavIgnore(getRawNavIgnore(rawConfig));
+  const publish = normalizePublishConfig(rawConfig, {
+    docsDir: configuredDocsDir,
+    projectDir,
+  });
+  const themeConfig = getThemeConfigOverride() ?? normalizeThemeConfig(rawConfig.theme);
+  const theme = resolveTheme({ kitRoot, projectDir, themeConfig });
 
   // Namespace generated files by project directory so separate docs projects
   // with the same site_key can be served from one kit checkout at the same time.
@@ -45,11 +55,13 @@ export function loadSmoothDocsConfig(options = {}) {
     kitRoot,
     projectDir,
     configPath,
+    configuredDocsDir,
     docsDir,
     siteKey,
     siteName,
     devPort,
     navIgnore,
+    publish,
     generatedSiteDir,
     generatedAllDir,
     theme,
@@ -124,11 +136,36 @@ function readConfigFile(configPath) {
   return YAML.parse(source) ?? {};
 }
 
-function normalizeThemeConfig(theme) {
+function getThemeConfigOverride() {
+  if (process.env.SMOOTH_DOCS_THEME_CONFIG) {
+    let parsed;
+
+    try {
+      parsed = JSON.parse(process.env.SMOOTH_DOCS_THEME_CONFIG);
+    } catch {
+      throw new Error("SMOOTH_DOCS_THEME_CONFIG must be valid JSON");
+    }
+
+    return normalizeThemeConfig(parsed, "SMOOTH_DOCS_THEME_CONFIG");
+  }
+
+  if (process.env.SMOOTH_DOCS_THEME) {
+    return normalizeThemeConfig(process.env.SMOOTH_DOCS_THEME, "SMOOTH_DOCS_THEME");
+  }
+
+  return null;
+}
+
+function normalizeThemeConfig(theme, label = "theme") {
   if (!theme) return { name: "default" };
   if (typeof theme === "string") return { name: theme };
   if (typeof theme === "object") return theme;
-  throw new Error("theme must be a string or object");
+  throw new Error(`${label} must be a string or object`);
+}
+
+function normalizeOptionalThemeConfig(theme, label) {
+  if (theme === undefined || theme === null || theme === false || theme === "") return null;
+  return normalizeThemeConfig(theme, label);
 }
 
 function getRawNavIgnore(rawConfig) {
@@ -152,6 +189,66 @@ function normalizeNavIgnore(value) {
   }
 
   throw new Error("nav.ignore must be a string or array of strings");
+}
+
+function normalizePublishConfig(rawConfig, { docsDir, projectDir }) {
+  const rawPublish =
+    rawConfig.publish && typeof rawConfig.publish === "object" ? rawConfig.publish : {};
+  const rootValue = rawPublish.root ?? rawPublish.root_dir ?? rawPublish.rootDir;
+  const outDirValue =
+    rawPublish.out_dir ??
+    rawPublish.outDir ??
+    rawConfig.out_dir ??
+    rawConfig.outDir ??
+    "site";
+  const themeValue = rawPublish.theme ?? rawPublish.default_theme ?? rawPublish.defaultTheme;
+
+  const outDir = normalizeProjectRelativePath(outDirValue, "publish.out_dir");
+  const outDirPath = path.resolve(projectDir, outDir);
+  const themeConfig = normalizeOptionalThemeConfig(themeValue, "publish.theme");
+
+  if (rootValue === undefined || rootValue === null || rootValue === false || rootValue === "") {
+    return {
+      enabled: false,
+      outDir,
+      outDirPath,
+      root: null,
+      rootDir: null,
+      themeConfig,
+    };
+  }
+
+  const root = normalizeProjectRelativePath(rootValue, "publish.root");
+  const rootDir = path.resolve(docsDir, root);
+
+  if (!isWithinPath(docsDir, rootDir)) {
+    throw new Error("publish.root must stay inside docs_dir");
+  }
+
+  return {
+    enabled: true,
+    outDir,
+    outDirPath,
+    root,
+    rootDir,
+    themeConfig,
+  };
+}
+
+function normalizeProjectRelativePath(value, label) {
+  const raw = String(value).trim();
+  if (!raw) return "";
+  if (path.isAbsolute(raw)) {
+    throw new Error(`${label} must be relative`);
+  }
+
+  const normalized = path.posix.normalize(raw.replace(/\\/g, "/").replace(/^\/+/, ""));
+  if (normalized === ".") return "";
+  if (normalized === ".." || normalized.startsWith("../")) {
+    throw new Error(`${label} cannot escape the project`);
+  }
+
+  return normalized.replace(/\/+$/, "");
 }
 
 function resolveTheme({ kitRoot, projectDir, themeConfig }) {
@@ -228,6 +325,11 @@ function normalizeSiteKey(value) {
   }
 
   return siteKey;
+}
+
+function isWithinPath(root, file) {
+  const relative = path.relative(root, file);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 function createGeneratedProjectKey(projectDir) {

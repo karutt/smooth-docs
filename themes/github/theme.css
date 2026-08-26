@@ -1043,6 +1043,10 @@ html body .docs-prose .docs-math-placeholder {
     font-size: var(--docs-article-small-font-size);
 }
 
+html body .docs-prose table {
+    line-height: 1.5;
+}
+
 html body .docs-prose .docs-code-block-header,
 html body .docs-prose .docs-code-block-label,
 html body .docs-prose .docs-code-copy,
@@ -1119,6 +1123,13 @@ html body .docs-prose .docs-task-item {
     list-style: none;
 }
 
+html body .docs-prose .docs-task-item:has(> .docs-task-checkbox) {
+    display: flex;
+    min-height: 1.5em;
+    align-items: center;
+    gap: var(--docs-task-item-gap);
+}
+
 html body .docs-prose .docs-task-item::marker {
     content: "";
 }
@@ -1132,19 +1143,22 @@ html body .docs-prose .docs-task-item > p {
     margin: 0;
 }
 
-html body .docs-prose .docs-task-item > :not(p:first-child) {
+html body .docs-prose .docs-task-item > :not(p:first-child):not(.docs-task-checkbox) {
     margin-left: calc(var(--docs-task-checkbox-size) + var(--docs-task-item-gap));
 }
 
 html body .docs-prose .docs-task-checkbox {
     position: relative;
     top: auto !important;
-    display: grid !important;
+    display: inline-grid !important;
+    flex: 0 0 var(--docs-task-checkbox-size);
     grid-column: 1;
+    place-content: center;
     align-self: center;
     justify-self: center;
     width: var(--docs-task-checkbox-size);
     height: var(--docs-task-checkbox-size);
+    line-height: 1;
     margin: 0 !important;
     padding: 0;
     border: 1px solid var(--docs-task-checkbox-border);

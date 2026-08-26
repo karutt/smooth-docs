@@ -4,11 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Smooth Docs Kit</title>
-    <link rel="stylesheet" href="/theme/theme.css" />
+    <link id="smooth-docs-theme-stylesheet" rel="stylesheet" href="/theme/theme.css" />
     <script>
       try {
         const theme = localStorage.getItem("smooth-docs-theme") || "dark";
         document.documentElement.classList.toggle("dark", theme === "dark");
+        const docsTheme = localStorage.getItem("smooth-docs-docs-theme") || "";
+        if (/^[a-zA-Z0-9_-]+$/.test(docsTheme)) {
+          const link = document.getElementById("smooth-docs-theme-stylesheet");
+          if (link) link.href = `/theme/${docsTheme}/theme.css`;
+        }
       } catch {
         document.documentElement.classList.add("dark");
       }

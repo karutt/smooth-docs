@@ -93,14 +93,45 @@ async function buildProject(rawArgs) {
   const options = parseArgs(rawArgs);
   const projectDir = path.resolve(options.positionals[0] ?? ".");
   const config = loadSmoothDocsConfig({ kitRoot, projectDir });
-  const outDir = path.resolve(projectDir, String(options.outDir ?? options.out ?? "site"));
+  const publishEnabled = options.all !== true && config.publish.enabled;
+  const sourceDir = publishEnabled ? config.publish.rootDir : config.configuredDocsDir;
+  const outDir = path.resolve(
+    projectDir,
+    String(options.outDir ?? options.out ?? config.publish.outDir ?? "site"),
+  );
+
+  assertSafeBuildOutput({
+    docsDir: config.configuredDocsDir,
+    outDir,
+    projectDir,
+  });
+
+  if (publishEnabled) {
+    await assertPublishSourceExists(sourceDir);
+  }
+
+  const env = {
+    SMOOTH_DOCS_DOCS_DIR: sourceDir,
+    SMOOTH_DOCS_PROJECT_DIR: projectDir,
+    SMOOTH_DOCS_STATIC_BUILD: "1",
+  };
+  const themeOverride = getBuildThemeOverride(options, config);
+  if (themeOverride.envKey) {
+    env[themeOverride.envKey] = themeOverride.envValue;
+  }
+
+  if (publishEnabled) {
+    console.log(
+      `Publishing ${path.relative(projectDir, sourceDir) || "."} to ${
+        path.relative(projectDir, outDir) || "."
+      }`,
+    );
+  }
 
   await runNode([viteBinPath(), "build", "--outDir", outDir, "--emptyOutDir"], {
-    SMOOTH_DOCS_PROJECT_DIR: projectDir,
+    ...env,
   });
-  await runNode([path.join(kitRoot, "scripts", "postbuild.mjs"), outDir], {
-    SMOOTH_DOCS_PROJECT_DIR: projectDir,
-  });
+  await runNode([path.join(kitRoot, "scripts", "postbuild.mjs"), outDir], env);
 
   console.log(`Built ${config.siteName} to ${outDir}`);
 }
@@ -124,7 +155,7 @@ function printHelp() {
 Usage:
   ${cliName} init <project-dir> [--title "My Docs"] [--theme default]
   ${cliName} run [project-dir] [--port 8100]
-  ${cliName} build [project-dir] [--out-dir site]
+  ${cliName} build [project-dir] [--out-dir site] [--theme default] [--all]
   ${cliName} themes
 
 Aliases:
@@ -325,6 +356,63 @@ function parseArgs(rawArgs) {
   }
 
   return options;
+}
+
+function getBuildThemeOverride(options, config) {
+  if (options.theme === true) {
+    throw new Error("--theme requires a theme name");
+  }
+
+  if (options.theme) {
+    return {
+      envKey: "SMOOTH_DOCS_THEME",
+      envValue: String(options.theme),
+    };
+  }
+
+  if (config.publish.themeConfig) {
+    return {
+      envKey: "SMOOTH_DOCS_THEME_CONFIG",
+      envValue: JSON.stringify(config.publish.themeConfig),
+    };
+  }
+
+  return {
+    envKey: "",
+    envValue: "",
+  };
+}
+
+function assertSafeBuildOutput({ docsDir, outDir, projectDir }) {
+  if (path.resolve(outDir) === path.resolve(projectDir)) {
+    throw new Error("Build output directory cannot be the project root");
+  }
+
+  if (isWithinPath(docsDir, outDir)) {
+    throw new Error("Build output directory cannot be inside docs_dir");
+  }
+}
+
+async function assertPublishSourceExists(sourceDir) {
+  let stat;
+
+  try {
+    stat = await fs.stat(sourceDir);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      throw new Error(`publish.root does not exist: ${sourceDir}`);
+    }
+    throw error;
+  }
+
+  if (!stat.isDirectory()) {
+    throw new Error(`publish.root is not a directory: ${sourceDir}`);
+  }
+}
+
+function isWithinPath(root, file) {
+  const relative = path.relative(root, file);
+  return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
 async function writeFileIfMissing(filePath, content) {

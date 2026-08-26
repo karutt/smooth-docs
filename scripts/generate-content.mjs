@@ -22,6 +22,7 @@ const oppositeSite = site;
 const sourceDir = config.docsDir;
 const generatedDir = config.generatedSiteDir;
 const publicDir = path.join(generatedDir, "public");
+const includeLocalPaths = process.env.SMOOTH_DOCS_STATIC_BUILD !== "1";
 
 const siteTitle = config.siteName;
 const navIgnorePatterns = expandDirectoryIgnorePatterns(config.navIgnore);
@@ -85,7 +86,7 @@ for (const relativePath of markdownFiles.sort()) {
     title,
     url: route,
     sourcePath: `${site}/docs/${relativePath}`,
-    absolutePath,
+    absolutePath: toPublicAbsolutePath(absolutePath),
     markdown: raw,
     html,
     text: plainText(markdown),
@@ -103,7 +104,7 @@ if (pages.length === 0) {
     title: siteTitle,
     url: "/",
     sourcePath: `${site}/docs/index.md`,
-    absolutePath: path.join(sourceDir, "index.md"),
+    absolutePath: toPublicAbsolutePath(path.join(sourceDir, "index.md")),
     markdown,
     html: renderMarkdown(markdown, { pageDir: "" }),
     text: plainText(markdown),
@@ -136,6 +137,10 @@ const output = `import type { DocsData } from "#smooth-docs/types";\n\nexport co
 )};\n`;
 
 await fs.writeFile(path.join(generatedDir, "docs-data.ts"), output);
+
+function toPublicAbsolutePath(absolutePath) {
+  return includeLocalPaths ? absolutePath : "";
+}
 
 function expandDirectoryIgnorePatterns(patterns) {
   const expanded = new Set();
@@ -1121,7 +1126,7 @@ function addInboxPages(pageList) {
     title: "Inbox",
     url: "/inbox/",
     sourcePath: `${site}/docs/inbox/`,
-    absolutePath: path.join(sourceDir, "inbox"),
+    absolutePath: toPublicAbsolutePath(path.join(sourceDir, "inbox")),
     markdown: "# Inbox\n\nRecent inbox documents.",
     html: renderInboxFallbackHtml(inboxItems),
     text: `${inboxItems.length} inbox documents`,
@@ -1134,7 +1139,7 @@ function addInboxPages(pageList) {
         title: page.title,
         url: page.url,
         sourcePath: page.sourcePath,
-        absolutePath: page.absolutePath,
+        absolutePath: toPublicAbsolutePath(page.absolutePath),
         text: page.text,
         createdAt: page.createdAt,
         updatedAt: page.updatedAt,
@@ -1164,7 +1169,7 @@ async function addRootFolderPage(pageList, directoryList) {
       title: titleFromSegment(path.posix.basename(directory)),
       url: toFolderRoute(directory),
       folderPath: `${site}/docs/${directory}`,
-      absolutePath: path.join(sourceDir, directory),
+      absolutePath: toPublicAbsolutePath(path.join(sourceDir, directory)),
       text: "Folder",
     }));
   const directPages = sourcePages
@@ -1174,7 +1179,7 @@ async function addRootFolderPage(pageList, directoryList) {
       title: page.title,
       url: page.url,
       sourcePath: page.sourcePath,
-      absolutePath: page.absolutePath,
+      absolutePath: toPublicAbsolutePath(page.absolutePath),
       text: page.text,
       createdAt: page.createdAt,
       updatedAt: page.updatedAt,
@@ -1185,7 +1190,7 @@ async function addRootFolderPage(pageList, directoryList) {
     title: siteTitle,
     url: toFolderRoute(""),
     sourcePath: `${site}/docs/`,
-    absolutePath,
+    absolutePath: toPublicAbsolutePath(absolutePath),
     markdown: "",
     html: renderFolderFallbackHtml("", items),
     text: `${items.length} items`,
@@ -1222,7 +1227,7 @@ async function addFolderPages(pageList, directoryList) {
           title: titleFromSegment(path.posix.basename(directory)),
           url: toFolderRoute(directory),
           folderPath: `${site}/docs/${directory}`,
-          absolutePath: folderAbsolutePath,
+          absolutePath: toPublicAbsolutePath(folderAbsolutePath),
           text: "Folder",
         };
       });
@@ -1233,7 +1238,7 @@ async function addFolderPages(pageList, directoryList) {
         title: page.title,
         url: page.url,
         sourcePath: page.sourcePath,
-        absolutePath: page.absolutePath,
+        absolutePath: toPublicAbsolutePath(page.absolutePath),
         text: page.text,
         createdAt: page.createdAt,
         updatedAt: page.updatedAt,
@@ -1244,7 +1249,7 @@ async function addFolderPages(pageList, directoryList) {
       title: titleFromSegment(path.posix.basename(folderPath)),
       url: toFolderRoute(folderPath),
       sourcePath: `${site}/docs/${folderPath}/`,
-      absolutePath,
+      absolutePath: toPublicAbsolutePath(absolutePath),
       markdown: "",
       html: renderFolderFallbackHtml(folderPath, items),
       text: `${items.length} items`,
