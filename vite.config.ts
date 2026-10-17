@@ -2,7 +2,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import * as readline from "node:readline";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -14,6 +14,13 @@ import {
   updateSmoothDocsTheme,
 } from "./scripts/config.mjs";
 import type { AllDocsData } from "./src/types";
+import { getCodexAppResourceDirs, resolveCodexCommand } from "./scripts/codex-command";
+import {
+  CodexMessageStream,
+  extractCodexThreadMessages,
+  type CodexChatMessage,
+  type CodexChatMessageUpdate,
+} from "./src/codex-chat";
 
 const docsConfig = loadSmoothDocsConfig({ kitRoot: __dirname });
 const allSites = [docsConfig.siteKey] as const;
@@ -56,7 +63,7 @@ type CodexJsonRpcMessage = {
 
 type CodexChatEvent =
   | { type: "status"; status: CodexChatStatus }
-  | { type: "delta"; text: string }
+  | ({ type: "message" } & CodexChatMessageUpdate)
   | { type: "done"; status: CodexChatStatus }
   | { type: "error"; message: string; status: CodexChatStatus };
 
@@ -69,17 +76,9 @@ type CodexChatStatus = {
   selectedModel: string | null;
 };
 
-type CodexChatRole = "assistant" | "system" | "user";
-
-type CodexChatHistoryMessage = {
-  id: string;
-  role: CodexChatRole;
-  content: string;
-};
-
 type CodexSessionResumeResult = {
   status: CodexChatStatus;
-  messages: CodexChatHistoryMessage[];
+  messages: CodexChatMessage[];
 };
 
 type CodexChatMessageRequest = {
@@ -434,6 +433,7 @@ function decodeUrlPathname(pathname: string) {
 }
 
 class CodexChatBridge {
+  private messageStream = new CodexMessageStream();
   private activeTurnId: string | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
   private events = new EventEmitter();
@@ -496,6 +496,7 @@ class CodexChatBridge {
 
     const params: Record<string, unknown> = {
       threadId: this.threadId,
+      summary: "auto",
       input: [
         {
           type: "text",
@@ -544,12 +545,25 @@ class CodexChatBridge {
   async listModels(): Promise<CodexModelOption[]> {
     await this.ensureInitialized();
 
-    const result = await this.sendRequest("model/list", {
-      includeHidden: false,
-      limit: 100,
-    });
-    const data = Array.isArray(result.data) ? result.data : [];
-    const models = data.map(normalizeCodexModelOption).filter(Boolean) as CodexModelOption[];
+    const catalog = new Map<string, CodexModelOption>();
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const result = await this.sendRequest("model/list", {
+        includeHidden: false,
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      const data = Array.isArray(result.data) ? result.data : [];
+      for (const entry of data) {
+        const model = normalizeCodexModelOption(entry);
+        if (model) catalog.set(model.model, model);
+      }
+      cursor = getString(result.nextCursor);
+      if (cursor && cursors.has(cursor)) throw new Error("Codex returned a repeated model-list cursor");
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    const models = [...catalog.values()];
 
     if (!this.selectedModel) {
       const defaultModel = models.find((model) => model.isDefault) ?? models[0];
@@ -811,22 +825,24 @@ class CodexChatBridge {
   }
 
   private handleNotification(method: string, params: Record<string, unknown>) {
+    if (typeof params.threadId === "string" && this.threadId && params.threadId !== this.threadId) return;
+
     if (method === "turn/started") {
+      this.messageStream.reset();
       const turn = getObject(params.turn);
       this.activeTurnId = getString(turn?.id) ?? this.activeTurnId;
       this.broadcast({ type: "status", status: this.getStatus() });
       return;
     }
 
-    if (method === "item/agentMessage/delta") {
-      const text = extractCodexDelta(params);
-      if (text) {
-        this.broadcast({ type: "delta", text });
-      }
+    const update = this.messageStream.handle(method, params);
+    if (update) {
+      this.broadcast({ type: "message", ...update });
       return;
     }
 
     if (method === "turn/completed") {
+      this.messageStream.reset();
       this.activeTurnId = null;
       this.broadcast({ type: "done", status: this.getStatus() });
       return;
@@ -887,33 +903,6 @@ const codexChatBridge = new CodexChatBridge({
   serviceName: "smooth_docs_kit",
 });
 
-function resolveCodexCommand() {
-  const configured = process.env.SMOOTH_DOCS_CODEX_BIN || process.env.CODEX_BIN || "";
-  const executableName = process.platform === "win32" ? "codex.cmd" : "codex";
-  const appResourceDirs = getCodexAppResourceDirs();
-  const pathCandidates = (process.env.PATH ?? "")
-    .split(path.delimiter)
-    .filter(Boolean)
-    .map((dir) => path.join(dir, executableName));
-  const homeCandidates = process.env.HOME
-    ? [
-        path.join(process.env.HOME, ".local", "bin", executableName),
-        path.join(process.env.HOME, ".codex", "bin", executableName),
-        path.join(process.env.HOME, ".codex", "plugins", ".plugin-appserver", executableName),
-      ]
-    : [];
-  const candidates = [
-    configured,
-    ...pathCandidates,
-    ...appResourceDirs.map((dir) => path.join(dir, executableName)),
-    "/opt/homebrew/bin/codex",
-    "/usr/local/bin/codex",
-    ...homeCandidates,
-  ].filter(Boolean);
-
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
-}
-
 function getCodexProcessEnv(command: string) {
   const commandDir = path.dirname(command);
   const extraPathEntries = [
@@ -927,23 +916,6 @@ function getCodexProcessEnv(command: string) {
     ...process.env,
     PATH: [...extraPathEntries, process.env.PATH].filter(Boolean).join(path.delimiter),
   };
-}
-
-function getCodexAppResourceDirs() {
-  if (process.platform !== "darwin") return [];
-
-  const homeApplications = process.env.HOME
-    ? [
-        path.join(process.env.HOME, "Applications", "ChatGPT.app", "Contents", "Resources"),
-        path.join(process.env.HOME, "Applications", "Codex.app", "Contents", "Resources"),
-      ]
-    : [];
-
-  return [
-    "/Applications/ChatGPT.app/Contents/Resources",
-    "/Applications/Codex.app/Contents/Resources",
-    ...homeApplications,
-  ];
 }
 
 function buildCodexChatPrompt(request: CodexChatMessageRequest) {
@@ -987,115 +959,6 @@ function buildCodexChatPrompt(request: CodexChatMessageRequest) {
 function trimCodexContext(value: string, maxLength: number) {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}\n[truncated]`;
-}
-
-function extractCodexDelta(params: Record<string, unknown>) {
-  const delta = params.delta;
-  if (typeof delta === "string") return delta;
-  if (typeof params.text === "string") return params.text;
-  if (typeof params.message === "string") return params.message;
-
-  const deltaObject = getObject(delta);
-  if (typeof deltaObject?.text === "string") return deltaObject.text;
-  if (typeof deltaObject?.content === "string") return deltaObject.content;
-
-  return "";
-}
-
-function extractCodexThreadMessages(
-  thread: Record<string, unknown> | null,
-  threadId: string,
-): CodexChatHistoryMessage[] {
-  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
-  const messages: CodexChatHistoryMessage[] = [];
-
-  for (const turnValue of turns) {
-    const turn = getObject(turnValue);
-    if (!turn) continue;
-
-    const turnId = getString(turn.id) ?? `turn-${messages.length}`;
-    const items = Array.isArray(turn.items) ? turn.items : [];
-
-    for (const itemValue of items) {
-      const message = normalizeCodexThreadItem(itemValue);
-      if (!message?.content.trim()) continue;
-      messages.push({
-        id: message.id ?? `${threadId}:${turnId}:${messages.length}`,
-        role: message.role,
-        content: message.content.trim(),
-      });
-    }
-
-    const error = getObject(turn.error);
-    const errorMessage = getString(error?.message);
-    if (errorMessage) {
-      messages.push({
-        id: `${threadId}:${turnId}:error`,
-        role: "system",
-        content: errorMessage,
-      });
-    }
-  }
-
-  return messages;
-}
-
-function normalizeCodexThreadItem(value: unknown): {
-  id: string | null;
-  role: CodexChatRole;
-  content: string;
-} | null {
-  const item = getObject(value);
-  if (!item) return null;
-
-  const type = getString(item.type);
-  const id = getString(item.id);
-
-  if (type === "userMessage") {
-    const content = Array.isArray(item.content)
-      ? item.content.map(extractCodexUserInputText).filter(Boolean).join("\n\n")
-      : "";
-    return {
-      id,
-      role: "user",
-      content: extractOriginalCodexUserRequest(content),
-    };
-  }
-
-  if (type === "agentMessage") {
-    return {
-      id,
-      role: "assistant",
-      content: getString(item.text) ?? "",
-    };
-  }
-
-  return null;
-}
-
-function extractCodexUserInputText(value: unknown) {
-  const input = getObject(value);
-  if (!input) return "";
-
-  const type = getString(input.type);
-  if (type === "text") return getString(input.text) ?? "";
-
-  if (type === "image") {
-    const url = getString(input.url);
-    return url ? `![image](${url})` : "";
-  }
-
-  if (type === "localImage") {
-    const imagePath = getString(input.path);
-    return imagePath ? `![image](${imagePath})` : "";
-  }
-
-  if (type === "mention" || type === "skill") {
-    const name = getString(input.name);
-    return name ? `@${name}` : "";
-  }
-
-  return "";
 }
 
 function extractOriginalCodexUserRequest(value: string) {

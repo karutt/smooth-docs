@@ -157,6 +157,92 @@
         animation: docs-dialog-content-out 100ms ease-in;
     }
 
+    @keyframes docs-chat-full-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    @keyframes docs-chat-full-out {
+        from { opacity: 1; }
+        to { opacity: 0; }
+    }
+
+    .docs-dialog-content.docs-chat-dialog {
+        transform: none;
+        animation: none;
+    }
+
+    .docs-chat-dialog[data-chat-mode="full"][data-state="open"] {
+        animation: docs-chat-full-in 140ms ease-out;
+    }
+
+    .docs-chat-dialog[data-chat-mode="full"][data-state="closed"] {
+        animation: docs-chat-full-out 120ms ease-in;
+    }
+
+    .docs-sidebar-resizer.docs-chat-resizer[data-side="right"] {
+        display: block;
+        left: 0;
+        transform: none;
+        touch-action: none;
+    }
+
+    .docs-chat-resizer::after {
+        left: 0;
+        transform: none;
+    }
+
+    .docs-chat-dock {
+        position: sticky;
+        top: 0;
+        align-self: flex-start;
+        flex-shrink: 0;
+        height: 100dvh;
+        overflow: hidden;
+        transition: width 220ms cubic-bezier(0.25, 1, 0.5, 1);
+    }
+
+    .docs-chat-dock-content {
+        opacity: 1;
+        transition: opacity 160ms ease;
+    }
+
+    .docs-chat-dock[data-state="closed"] .docs-chat-dock-content {
+        opacity: 0;
+    }
+
+    .docs-sidebar-resizing .docs-chat-dock {
+        transition: none !important;
+    }
+
+    @media (max-width: 767px) {
+        .docs-chat-dock {
+            position: relative;
+            height: 0;
+        }
+
+        .docs-chat-dock[data-state="open"] {
+            flex-basis: 100%;
+            width: 100% !important;
+            height: 70dvh;
+        }
+
+        .docs-chat-resizer {
+            display: none !important;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .docs-chat-dialog[data-chat-mode][data-state] {
+            animation: none;
+        }
+
+        .docs-chat-dock,
+        .docs-chat-dock-content {
+            transition: none;
+        }
+    }
+
     @keyframes docs-command-dialog-in {
         from {
             opacity: 0;
@@ -1133,7 +1219,7 @@
     }
 
     .docs-chat-markdown {
-        @apply min-w-0 max-w-none text-sm leading-6;
+        @apply min-w-0 max-w-none text-base leading-7;
         overflow-wrap: anywhere;
         white-space: normal;
     }

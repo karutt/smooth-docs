@@ -1,6 +1,7 @@
 import * as React from "react";
 import { docsDataBySite as initialDocsDataBySite } from "#docs-data";
 import {
+    ArrowUp,
     Bot,
     BookOpen,
     CheckCircle2,
@@ -17,6 +18,7 @@ import {
     Loader2,
     MessageSquareText,
     Maximize2,
+    Minimize2,
     Minus,
     Moon,
     Palette,
@@ -25,7 +27,6 @@ import {
     Pin,
     Plus,
     RotateCcw,
-    Send,
     Settings as SettingsIcon,
     Square,
     Sun,
@@ -98,6 +99,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { Toggle } from "@/components/ui/toggle";
 import type { AllDocsData, DocPage, DocsData, NavItem, SiteKey } from "@/types";
 import { cn } from "@/lib/utils";
+import { CodexChatMessages } from "@/components/CodexChatMessages";
+import { upsertCodexChatMessage, type CodexChatMessage, type CodexChatMessageUpdate } from "../../../src/codex-chat";
 import "katex/dist/katex.min.css";
 import { toast } from "sonner";
 
@@ -175,12 +178,6 @@ type DocsEntryContextMenuRequest = {
 type PinToastState = {
     id: number;
     message: string;
-};
-
-type CodexChatMessage = {
-    id: string;
-    role: "assistant" | "system" | "user";
-    content: string;
 };
 
 type CodexChatStatus = {
@@ -421,6 +418,11 @@ const PIN_FONT_STEP_KEY = "smooth-docs-kit-pin-font-step";
 const PIN_PANEL_WIDTH_KEY = "smooth-docs-kit-pin-panel-width";
 const LEFT_SIDEBAR_WIDTH_KEY = "smooth-docs-kit-left-sidebar-width";
 const TOC_PANEL_WIDTH_KEY = "smooth-docs-kit-toc-panel-width";
+const CODEX_CHAT_WIDTH_KEY = "smooth-docs-kit-codex-chat-width";
+const CODEX_CHAT_SESSION_KEY = "smooth-docs-kit-codex-chat-session";
+const DEFAULT_CODEX_CHAT_WIDTH = 480;
+const MIN_CODEX_CHAT_WIDTH = 320;
+const MAX_CODEX_CHAT_WIDTH = 960;
 const MAX_PINNED_BLOCKS = 6;
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 264;
 const MIN_LEFT_SIDEBAR_WIDTH = 220;
@@ -1772,6 +1774,14 @@ export function App() {
                 return;
             }
 
+            if (import.meta.env.DEV && primary && event.shiftKey && !event.altKey && code === "KeyL") {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                if (!event.repeat) setCodexChatOpen((current) => !current);
+                return;
+            }
+
             if (event.defaultPrevented) return;
 
             const plainPrimary = primary && !event.altKey && !event.shiftKey;
@@ -1933,7 +1943,7 @@ export function App() {
 
     return (
         <SidebarProvider
-            className={cn(uiSettings.reduceMotion && "docs-reduce-motion")}
+            className={cn(uiSettings.reduceMotion && "docs-reduce-motion", codexChatOpen && "max-md:flex-wrap")}
             open={sidebarOpen}
             onOpenChange={setSidebarOpen}
             style={{ "--sidebar-width": `${leftSidebarWidth}px` } as React.CSSProperties}>
@@ -2071,7 +2081,7 @@ export function App() {
                 tocPanelWidth={tocPanelWidth}
             />
 
-            <SidebarInset>
+            <SidebarInset className={codexChatOpen ? "max-md:w-full max-md:flex-none" : undefined}>
                 {!zenMode && (
                     <header
                         className={cn(
@@ -2210,21 +2220,7 @@ export function App() {
                             </div>
                         </div>
 
-                        {import.meta.env.DEV ? (
-                            <CodexChatWidget
-                                contextBlocks={codexContextBlocks}
-                                currentPage={currentPage}
-                                onContextBlockRemove={(id) =>
-                                    setCodexContextBlocks((current) =>
-                                        current.filter((block) => block.id !== id),
-                                    )
-                                }
-                                onContextBlocksClear={() => setCodexContextBlocks([])}
-                                onOpenChange={setCodexChatOpen}
-                                open={codexChatOpen}
-                                site={route.site}
-                            />
-                        ) : null}
+
 
                         {rightSidebarOpen && hasPinnedBlocks ? (
                             <PinnedBlocksPanel
@@ -2253,6 +2249,23 @@ export function App() {
                     </div>
                 </main>
             </SidebarInset>
+
+            {import.meta.env.DEV ? (
+                <CodexChatWidget
+                    contextBlocks={codexContextBlocks}
+                    currentPage={currentPage}
+                    leftSidebarWidth={!zenMode && sidebarOpen ? leftSidebarWidth : 0}
+                    onContextBlockRemove={(id) =>
+                        setCodexContextBlocks((current) =>
+                            current.filter((block) => block.id !== id),
+                        )
+                    }
+                    onContextBlocksClear={() => setCodexContextBlocks([])}
+                    onOpenChange={setCodexChatOpen}
+                    open={codexChatOpen}
+                    site={route.site}
+                />
+            ) : null}
 
             <PinContextMenu
                 canAddContext={import.meta.env.DEV}
@@ -2488,11 +2501,13 @@ function TableOfContents({
 
 function SidebarWidthResizer({
     ariaLabel,
+    className,
     onWidthChange,
     side,
     width,
 }: {
     ariaLabel: string;
+    className?: string;
     onWidthChange: (width: number) => void;
     side: "left" | "right";
     width: number;
@@ -2565,11 +2580,13 @@ function SidebarWidthResizer({
             role='separator'
             aria-label={ariaLabel}
             aria-orientation='vertical'
-            className='docs-sidebar-resizer'
+            aria-valuenow={Math.round(width)}
+            className={cn("docs-sidebar-resizer", className)}
             data-side={side}
             tabIndex={0}
             onKeyDown={resizeWithKeyboard}
             onPointerCancel={endResize}
+            onLostPointerCapture={endResize}
             onPointerDown={beginResize}
             onPointerMove={updateResize}
             onPointerUp={endResize}
@@ -3235,6 +3252,7 @@ function PinToast({ onDone, toast }: { onDone: () => void; toast: PinToastState 
 function CodexChatWidget({
     contextBlocks,
     currentPage,
+    leftSidebarWidth,
     onContextBlockRemove,
     onContextBlocksClear,
     onOpenChange,
@@ -3243,6 +3261,7 @@ function CodexChatWidget({
 }: {
     contextBlocks: CodexContextBlock[];
     currentPage: DocPage;
+    leftSidebarWidth: number;
     onContextBlockRemove: (id: string) => void;
     onContextBlocksClear: () => void;
     onOpenChange: (open: boolean) => void;
@@ -3250,15 +3269,28 @@ function CodexChatWidget({
     site: SiteKey;
 }) {
     const [draft, setDraft] = React.useState("");
+    const [expanded, setExpanded] = React.useState(false);
+    const [panelWidth, setPanelWidth] = React.useState(() => {
+        const saved = Number.parseInt(readStorageValue(CODEX_CHAT_WIDTH_KEY) ?? "", 10);
+        return Number.isFinite(saved)
+            ? clamp(saved, MIN_CODEX_CHAT_WIDTH, MAX_CODEX_CHAT_WIDTH)
+            : DEFAULT_CODEX_CHAT_WIDTH;
+    });
+    const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth);
+    const dockWidthLimit = viewportWidth < 768
+        ? viewportWidth
+        : Math.max(MIN_CODEX_CHAT_WIDTH, viewportWidth - (viewportWidth >= 1024 ? leftSidebarWidth : 0) - 320);
+    const displayedPanelWidth = viewportWidth < 768 ? viewportWidth : Math.min(panelWidth, dockWidthLimit);
     const [messages, setMessages] = React.useState<CodexChatMessage[]>([]);
     const [models, setModels] = React.useState<CodexModelOption[]>([]);
     const [modelsLoading, setModelsLoading] = React.useState(false);
-    const [panelMounted, setPanelMounted] = React.useState(open);
-    const [panelVisible, setPanelVisible] = React.useState(open);
     const [sending, setSending] = React.useState(false);
     const [sessions, setSessions] = React.useState<CodexSessionSummary[]>([]);
     const [sessionsLoading, setSessionsLoading] = React.useState(false);
     const [sessionsOpen, setSessionsOpen] = React.useState(false);
+    const [sessionLoading, setSessionLoading] = React.useState(false);
+    const [sessionReady, setSessionReady] = React.useState(false);
+    const [statusLoaded, setStatusLoaded] = React.useState(false);
     const [status, setStatus] = React.useState<CodexChatStatus>({
         available: true,
         running: false,
@@ -3268,33 +3300,24 @@ function CodexChatWidget({
         selectedModel: null,
     });
     const assistantMessageIdRef = React.useRef<string | null>(null);
+    const previousSessionRef = React.useRef(readStorageValue(CODEX_CHAT_SESSION_KEY));
+    const restoreStartedRef = React.useRef(false);
+    const draftRef = React.useRef<HTMLTextAreaElement>(null);
+    const launcherRef = React.useRef<HTMLButtonElement>(null);
     const endRef = React.useRef<HTMLDivElement>(null);
 
     const appendMessage = React.useCallback((message: CodexChatMessage) => {
         setMessages((current) => [...current, message]);
     }, []);
 
-    const appendAssistantDelta = React.useCallback((text: string) => {
+    const updateAssistantMessage = React.useCallback(({ message, append }: CodexChatMessageUpdate) => {
+        const placeholderId = assistantMessageIdRef.current;
         setMessages((current) => {
-            const assistantId = assistantMessageIdRef.current ?? createClientId();
-            assistantMessageIdRef.current = assistantId;
-            const existingIndex = current.findIndex((message) => message.id === assistantId);
-
-            if (existingIndex === -1) {
-                return [
-                    ...current,
-                    {
-                        id: assistantId,
-                        role: "assistant",
-                        content: text,
-                    },
-                ];
-            }
-
-            return current.map((message, index) =>
-                index === existingIndex
-                    ? { ...message, content: `${message.content}${text}` }
-                    : message,
+            if (!message.content && !current.some((entry) => entry.id === message.id)) return current;
+            return upsertCodexChatMessage(
+                current.filter((entry) => entry.id !== placeholderId || entry.content),
+                message,
+                append,
             );
         });
     }, []);
@@ -3312,17 +3335,21 @@ function CodexChatWidget({
 
         const onStatus = (event: MessageEvent<string>) => {
             const data = readData<CodexChatStatus>(event);
-            if (data) setStatus(data);
+            if (data) {
+                setStatus(data);
+                setStatusLoaded(true);
+            }
         };
 
-        const onDelta = (event: MessageEvent<string>) => {
-            const data = readData<{ text?: string }>(event);
-            if (data?.text) appendAssistantDelta(data.text);
+        const onMessage = (event: MessageEvent<string>) => {
+            const data = readData<CodexChatMessageUpdate>(event);
+            if (data?.message) updateAssistantMessage(data);
         };
 
         const onDone = (event: MessageEvent<string>) => {
             const data = readData<{ status?: CodexChatStatus }>(event);
             if (data?.status) setStatus(data.status);
+            setMessages((current) => current.filter((entry) => entry.content));
             assistantMessageIdRef.current = null;
         };
 
@@ -3339,7 +3366,7 @@ function CodexChatWidget({
         };
 
         source.addEventListener("status", onStatus);
-        source.addEventListener("delta", onDelta);
+        source.addEventListener("message", onMessage);
         source.addEventListener("done", onDone);
         source.addEventListener("error", onCodexError);
         source.onerror = () => {
@@ -3353,35 +3380,54 @@ function CodexChatWidget({
 
         return () => {
             source.removeEventListener("status", onStatus);
-            source.removeEventListener("delta", onDelta);
+            source.removeEventListener("message", onMessage);
             source.removeEventListener("done", onDone);
             source.removeEventListener("error", onCodexError);
             source.close();
         };
-    }, [appendAssistantDelta, appendMessage]);
+    }, [updateAssistantMessage, appendMessage]);
 
     React.useEffect(() => {
         if (!open) return;
         endRef.current?.scrollIntoView({ block: "end" });
-    }, [messages, open, status.running]);
+    }, [expanded, messages, open, status.running]);
+
+    React.useLayoutEffect(() => {
+        const input = draftRef.current;
+        if (!input) return;
+        input.style.height = "0px";
+        input.style.height = `${Math.min(Math.max(input.scrollHeight, 48), 192)}px`;
+    }, [draft, expanded, open]);
+
+    React.useLayoutEffect(() => {
+        if (open) setExpanded(false);
+    }, [open]);
 
     React.useEffect(() => {
-        if (open) {
-            setPanelMounted(true);
-            const frame = window.requestAnimationFrame(() => setPanelVisible(true));
-            return () => window.cancelAnimationFrame(frame);
-        }
+        if (open && !expanded) draftRef.current?.focus({ preventScroll: window.innerWidth >= 768 });
+    }, [expanded, open]);
 
-        setPanelVisible(false);
-        const timer = window.setTimeout(() => setPanelMounted(false), 200);
-        return () => window.clearTimeout(timer);
-    }, [open]);
+    React.useEffect(() => {
+        const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+        window.addEventListener("resize", updateViewportWidth);
+        return () => window.removeEventListener("resize", updateViewportWidth);
+    }, []);
+
+    const updatePanelWidth = React.useCallback((width: number) => {
+        const next = Math.round(clamp(
+            width,
+            MIN_CODEX_CHAT_WIDTH,
+            Math.max(MIN_CODEX_CHAT_WIDTH, Math.min(MAX_CODEX_CHAT_WIDTH, dockWidthLimit)),
+        ));
+        setPanelWidth(next);
+        writeStorageValue(CODEX_CHAT_WIDTH_KEY, String(next));
+    }, [dockWidthLimit]);
 
     const loadModels = React.useCallback(async () => {
         setModelsLoading(true);
 
         try {
-            const response = await fetch("/__smooth-docs/codex/models", { method: "GET" });
+            const response = await fetch("/__smooth-docs/codex/models", { method: "GET", cache: "no-store" });
             const data = (await response.json().catch(() => ({}))) as {
                 models?: CodexModelOption[];
                 status?: CodexChatStatus;
@@ -3477,9 +3523,9 @@ function CodexChatWidget({
     }, [appendMessage]);
 
     React.useEffect(() => {
-        if (!open || models.length > 0 || modelsLoading) return;
+        if (!open) return;
         void loadModels();
-    }, [loadModels, models.length, modelsLoading, open]);
+    }, [loadModels, open]);
 
     const toggleSessions = React.useCallback(() => {
         setSessionsOpen((current) => {
@@ -3492,6 +3538,10 @@ function CodexChatWidget({
     const resumeSession = React.useCallback(
         async (threadId: string) => {
             if (status.running) return;
+
+            restoreStartedRef.current = true;
+            setSessionLoading(true);
+            setSessionReady(false);
 
             try {
                 const response = await fetch("/__smooth-docs/codex/session", {
@@ -3517,10 +3567,30 @@ function CodexChatWidget({
                     role: "system",
                     content: error instanceof Error ? error.message : "Failed to resume session",
                 });
+            } finally {
+                setSessionLoading(false);
+                setSessionReady(true);
             }
         },
         [appendMessage, status.running],
     );
+
+    React.useEffect(() => {
+        if (!open || !statusLoaded || status.running || restoreStartedRef.current) return;
+        restoreStartedRef.current = true;
+        const threadId = previousSessionRef.current || status.threadId;
+        if (threadId) {
+            void resumeSession(threadId);
+        } else {
+            setSessionReady(true);
+        }
+    }, [open, resumeSession, status.running, status.threadId, statusLoaded]);
+
+    React.useEffect(() => {
+        if (!sessionReady || sessionLoading || !status.threadId) return;
+        previousSessionRef.current = status.threadId;
+        writeStorageValue(CODEX_CHAT_SESSION_KEY, status.threadId);
+    }, [sessionLoading, sessionReady, status.threadId]);
 
     const stopTurn = React.useCallback(async () => {
         if (!status.running) return;
@@ -3548,7 +3618,7 @@ function CodexChatWidget({
 
     const submit = React.useCallback(async () => {
         const text = draft.trim();
-        if (!text || sending || status.running) return;
+        if (!text || sending || status.running || sessionLoading || !sessionReady) return;
 
         const assistantId = createClientId();
         assistantMessageIdRef.current = assistantId;
@@ -3625,13 +3695,18 @@ function CodexChatWidget({
         currentPage.url,
         draft,
         sending,
+        sessionLoading,
+        sessionReady,
         site,
         status.running,
     ]);
 
     const reset = React.useCallback(async () => {
-        if (status.running) return;
+        if (status.running || sessionLoading) return;
 
+        restoreStartedRef.current = true;
+        setSessionReady(false);
+        setSessionLoading(true);
         setMessages([]);
         assistantMessageIdRef.current = null;
 
@@ -3651,8 +3726,11 @@ function CodexChatWidget({
                 role: "system",
                 content: message,
             });
+        } finally {
+            setSessionLoading(false);
+            setSessionReady(true);
         }
-    }, [appendMessage, status.running]);
+    }, [appendMessage, sessionLoading, status.running]);
 
     const onDraftKeyDown = React.useCallback(
         (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -3675,298 +3753,321 @@ function CodexChatWidget({
         currentModel?.defaultEffort ||
         effortOptions[0]?.value ||
         "";
-    const chatLabel = status.running ? "Working" : status.lastError ? "Offline" : "Ready";
-    const canSend = draft.trim().length > 0 && !sending && !status.running;
-    const showPanel = open || panelMounted;
+    const canSend = draft.trim().length > 0 && !sending && !status.running && !sessionLoading && sessionReady;
 
-    return (
+    const dockOpen = open && !expanded;
+    const renderChatContent = (fullScreen: boolean) => (
         <>
-            {showPanel ? (
-                <section
-                    aria-label='Codex chat'
-                    className={cn(
-                        "fixed bottom-4 right-4 top-4 z-50 flex w-[min(440px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border bg-background shadow-2xl transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                        panelVisible
-                            ? "translate-x-0 opacity-100"
-                            : "pointer-events-none translate-x-6 opacity-0",
-                    )}>
-                    <div className='flex h-12 shrink-0 items-center gap-2 border-b px-3'>
-                        <Bot className='h-4 w-4 text-muted-foreground' />
-                        <div className='min-w-0 flex-1'>
-                            <div className='truncate text-sm font-medium'>Codex</div>
-                            <div className='truncate text-xs text-muted-foreground'>
-                                {chatLabel}
-                            </div>
-                        </div>
-                        <TooltipProvider delayDuration={300}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        onClick={toggleSessions}
-                                        aria-label='Show Codex sessions'>
-                                        <PanelRight className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Sessions</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        disabled={!status.running}
-                                        onClick={() => void stopTurn()}
-                                        aria-label='Stop Codex turn'>
-                                        <Square className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Stop</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        disabled={status.running}
-                                        onClick={() => void reset()}
-                                        aria-label='New Codex thread'>
-                                        <RotateCcw className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>New thread</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        onClick={() => onOpenChange(false)}
-                                        aria-label='Close Codex chat'>
-                                        <X className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Close</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
-
-                    <div className='grid shrink-0 gap-2 border-b p-2 sm:grid-cols-[minmax(0,1fr)_10rem]'>
-                        <select
-                            className='h-8 min-w-0 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                            value={selectedModel}
-                            disabled={modelsLoading || status.running}
-                            onChange={(event) => {
-                                const model = event.target.value || null;
-                                const nextModel = models.find((item) => item.model === model);
-                                void updateCodexSettings({
-                                    model,
-                                    effort: nextModel?.defaultEffort ?? selectedEffort,
-                                });
-                            }}
-                            aria-label='Codex model'>
-                            {models.length === 0 ? (
-                                <option value=''>
-                                    {modelsLoading ? "Loading models..." : "Default model"}
-                                </option>
-                            ) : (
-                                models.map((model) => (
-                                    <option key={model.id} value={model.model}>
-                                        {model.displayName}
-                                    </option>
-                                ))
-                            )}
-                        </select>
-                        <select
-                            className='h-8 min-w-0 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                            value={selectedEffort}
-                            disabled={status.running}
-                            onChange={(event) =>
-                                void updateCodexSettings({ effort: event.target.value || null })
-                            }
-                            aria-label='Codex reasoning effort'>
-                            {effortOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {formatCodexEffortLabel(option.value)}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {sessionsOpen && (
-                        <div className='max-h-52 shrink-0 overflow-y-auto border-b p-2'>
-                            <div className='mb-2 flex items-center justify-between gap-2'>
-                                <span className='text-xs font-medium text-muted-foreground'>
-                                    Sessions
-                                </span>
-                                <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='sm'
-                                    className='h-7 px-2 text-xs'
-                                    disabled={sessionsLoading}
-                                    onClick={() => void loadSessions()}>
-                                    Refresh
-                                </Button>
-                            </div>
-                            {sessionsLoading ? (
-                                <div className='py-3 text-center text-xs text-muted-foreground'>
-                                    Loading...
-                                </div>
-                            ) : sessions.length === 0 ? (
-                                <div className='py-3 text-center text-xs text-muted-foreground'>
-                                    No sessions
-                                </div>
-                            ) : (
-                                <div className='space-y-1'>
-                                    {sessions.map((session) => (
-                                        <button
-                                            key={session.id}
-                                            type='button'
-                                            className={cn(
-                                                "flex w-full min-w-0 flex-col rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
-                                                session.id === status.threadId && "bg-accent",
-                                            )}
-                                            disabled={status.running}
-                                            onClick={() => void resumeSession(session.id)}>
-                                            <span className='truncate font-medium'>
-                                                {session.name}
-                                            </span>
-                                            <span className='truncate text-muted-foreground'>
-                                                {formatCodexSessionTimestamp(session.updatedAt)} ·{" "}
-                                                {session.status}
-                                            </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    <div className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3'>
-                        {messages.length === 0 ? (
-                            <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                                No messages yet
-                            </div>
+            {!fullScreen && (
+                <SidebarWidthResizer
+                    ariaLabel='Resize Codex chat panel'
+                    className='docs-chat-resizer'
+                    side='right'
+                    width={displayedPanelWidth}
+                    onWidthChange={updatePanelWidth}
+                />
+            )}
+            <header className={cn(
+                "flex h-16 shrink-0 items-center justify-between gap-3",
+                fullScreen ? "px-4 pr-14 sm:px-8 sm:pr-16" : "px-3 pr-12",
+            )}>
+                <div className='flex min-w-0 items-center gap-2'>
+                    {fullScreen ? (
+                        <DialogTitle className='hidden text-base font-medium sm:block'>Codex</DialogTitle>
+                    ) : <h2 className='sr-only'>Codex chat</h2>}
+                    <select
+                        className='h-9 min-w-0 max-w-[50vw] rounded-lg bg-transparent px-2 text-base font-medium outline-none hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring sm:max-w-64'
+                        value={selectedModel}
+                        disabled={modelsLoading || status.running}
+                        onChange={(event) => {
+                            const model = event.target.value || null;
+                            const nextModel = models.find((item) => item.model === model);
+                            void updateCodexSettings({
+                                model,
+                                effort: nextModel?.defaultEffort ?? selectedEffort,
+                            });
+                        }}
+                        aria-label='Codex model'>
+                        {selectedModel && !currentModel && <option value={selectedModel}>{selectedModel}</option>}
+                        {models.length === 0 ? (
+                            <option value=''>
+                                {modelsLoading ? "Loading models..." : "Default model"}
+                            </option>
                         ) : (
-                            messages.map((message) => (
-                                <div
-                                    key={message.id}
-                                    className={cn(
-                                        "flex",
-                                        message.role === "user" ? "justify-end" : "justify-start",
-                                    )}>
-                                    <div
-                                        className={cn(
-                                            "max-w-[85%] rounded-md border px-3 py-2 text-sm leading-6",
-                                            message.role === "user"
-                                                ? "border-primary bg-primary text-primary-foreground"
-                                                : message.role === "system"
-                                                  ? "border-destructive/40 bg-destructive/10 text-destructive"
-                                                  : "bg-card text-card-foreground",
-                                        )}>
-                                        {message.content ? (
-                                            <ChatMarkdownMessage content={message.content} />
-                                        ) : (
-                                            <span className='inline-flex items-center gap-2 text-muted-foreground'>
-                                                <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                                                Working
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
+                            models.map((model) => (
+                                <option key={model.id} value={model.model}>{model.displayName}</option>
                             ))
                         )}
-                        <div ref={endRef} />
-                    </div>
-
-                    {status.lastError && (
-                        <div className='border-t px-3 py-2 text-xs text-destructive'>
-                            {status.lastError}
-                        </div>
-                    )}
-
-                    <div className='border-t p-3'>
-                        {contextBlocks.length > 0 && (
-                            <div className='mb-2 flex flex-wrap items-center gap-1.5'>
-                                {contextBlocks.map((block) => (
-                                    <span
-                                        key={block.id}
-                                        className='inline-flex max-w-full items-center gap-1 rounded-md border bg-muted px-2 py-1 text-xs text-muted-foreground'>
-                                        <FileText className='h-3 w-3 shrink-0' />
-                                        <span className='max-w-40 truncate'>{block.label}</span>
-                                        <button
-                                            type='button'
-                                            className='rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                                            onClick={() => onContextBlockRemove(block.id)}
-                                            aria-label={`Remove Codex context: ${block.label}`}>
-                                            <X className='h-3 w-3' />
-                                        </button>
-                                    </span>
-                                ))}
-                                <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='sm'
-                                    className='h-7 px-2 text-xs'
-                                    onClick={onContextBlocksClear}>
-                                    Clear
-                                </Button>
-                            </div>
-                        )}
-                        <div className='flex items-end gap-2'>
-                            <textarea
-                                className='max-h-32 min-h-20 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm leading-5 outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring'
-                                value={draft}
-                                onChange={(event) => setDraft(event.target.value)}
-                                onKeyDown={onDraftKeyDown}
-                                placeholder='Ask Codex...'
-                                spellCheck={true}
-                            />
-                            <Button
-                                type='button'
-                                size='icon'
-                                className='h-10 w-10 shrink-0'
-                                disabled={!canSend}
-                                onClick={() => void submit()}
-                                aria-label='Send Codex message'>
-                                {sending || status.running ? (
-                                    <Loader2 className='h-4 w-4 animate-spin' />
-                                ) : (
-                                    <Send className='h-4 w-4' />
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                </section>
-            ) : (
-                <div className='fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-3'>
+                    </select>
+                    <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        className='h-8 w-8 shrink-0 text-muted-foreground'
+                        disabled={modelsLoading || status.running}
+                        onClick={() => void loadModels()}
+                        aria-label='Refresh Codex models'
+                        title='Refresh models'>
+                        <RotateCcw className={cn("h-3.5 w-3.5", modelsLoading && "animate-spin")} />
+                    </Button>
+                </div>
+                <div className='flex shrink-0 items-center gap-1'>
                     <TooltipProvider delayDuration={300}>
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
                                     type='button'
+                                    variant='ghost'
+                                    size='icon'
+                                    className='h-9 w-9 rounded-full text-muted-foreground'
+                                    onClick={toggleSessions}
+                                    aria-label='Show Codex sessions'
+                                    aria-expanded={sessionsOpen}>
+                                    <PanelRight className='h-4 w-4' />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Sessions</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='icon'
+                                    className='h-9 w-9 rounded-full text-muted-foreground'
+                                disabled={sending || status.running || sessionLoading}
+                                    onClick={() => void reset()}
+                                    aria-label='New Codex thread'>
+                                    <PencilLine className='h-4 w-4' />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>New thread</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='icon'
+                                    className='h-9 w-9 rounded-full text-muted-foreground'
+                                    onClick={() => setExpanded((current) => !current)}
+                                    aria-label={fullScreen ? "Exit full screen" : "Expand Codex chat"}
+                                    aria-pressed={fullScreen}>
+                                    {fullScreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{fullScreen ? "Side panel" : "Full screen"}</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+            </header>
+
+            {sessionsOpen && (
+                <div className='absolute right-4 top-16 z-10 max-h-[50vh] w-[min(26rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border bg-background p-3 shadow-lg'>
+                    <div className='mb-2 flex items-center justify-between gap-2'>
+                        <span className='text-sm font-medium'>Sessions</span>
+                        <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            className='h-7 px-2 text-xs'
+                            disabled={sessionsLoading}
+                            onClick={() => void loadSessions()}>
+                            Refresh
+                        </Button>
+                    </div>
+                    {sessionsLoading ? (
+                        <div className='py-3 text-center text-sm text-muted-foreground'>Loading...</div>
+                    ) : sessions.length === 0 ? (
+                        <div className='py-3 text-center text-sm text-muted-foreground'>No sessions</div>
+                    ) : (
+                        <div className='space-y-1'>
+                            {sessions.map((session) => (
+                                <button
+                                    key={session.id}
+                                    type='button'
+                                    className={cn(
+                                        "flex w-full min-w-0 flex-col rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
+                                        session.id === status.threadId && "bg-muted",
+                                    )}
+                                    disabled={status.running || sessionLoading}
+                                    onClick={() => void resumeSession(session.id)}>
+                                    <span className='truncate font-medium'>{session.name}</span>
+                                    <span className='truncate text-xs text-muted-foreground'>
+                                        {formatCodexSessionTimestamp(session.updatedAt)} · {session.status}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className='min-h-0 flex-1 overflow-y-auto'>
+                <div className={cn(
+                    "flex min-h-full w-full flex-col gap-8",
+                    fullScreen ? "px-5 py-10 sm:gap-10 sm:px-10 sm:py-16 lg:px-[8vw]" : "px-5 py-6",
+                )}>
+                    {messages.length === 0 ? (
+                        <div className='flex flex-1 items-center justify-center text-xl font-medium text-muted-foreground'>
+                        {sessionLoading || !sessionReady ? "Loading conversation..." : "What can I help with?"}
+                        </div>
+                    ) : (
+                        <CodexChatMessages
+                            messages={messages}
+                            working={sending || status.running}
+                            renderContent={(content) => <ChatMarkdownMessage content={content} />}
+                        />
+                    )}
+                    <div ref={endRef} />
+                </div>
+            </div>
+
+            <div className={cn(
+                "shrink-0 bg-background pt-4",
+                fullScreen ? "px-5 pb-6 sm:px-10 sm:pb-10 lg:px-[8vw]" : "px-4 pb-4",
+            )}>
+                {status.lastError && (
+                    <div className='mb-3 text-sm text-destructive'>{status.lastError}</div>
+                )}
+                {contextBlocks.length > 0 && (
+                    <div className='mb-3 flex flex-wrap items-center gap-1.5'>
+                        {contextBlocks.map((block) => (
+                            <span
+                                key={block.id}
+                                className='inline-flex max-w-full items-center gap-1 rounded-xl bg-muted px-3 py-1.5 text-xs text-muted-foreground'>
+                                <FileText className='h-3 w-3 shrink-0' />
+                                <span className='max-w-40 truncate'>{block.label}</span>
+                                <button
+                                    type='button'
+                                    className='rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                                    onClick={() => onContextBlockRemove(block.id)}
+                                    aria-label={`Remove Codex context: ${block.label}`}>
+                                    <X className='h-3 w-3' />
+                                </button>
+                            </span>
+                        ))}
+                        <Button type='button' variant='ghost' size='sm' className='h-7 px-2 text-xs' onClick={onContextBlocksClear}>
+                            Clear
+                        </Button>
+                    </div>
+                )}
+                <div className='flex w-full items-end gap-2 rounded-[2rem] bg-muted/70 p-2 pl-5 ring-1 ring-border/40 focus-within:ring-border'>
+                    <textarea
+                        ref={draftRef}
+                        rows={1}
+                        className='max-h-48 min-h-12 min-w-0 flex-1 resize-none bg-transparent py-3 text-base leading-6 outline-none placeholder:text-muted-foreground'
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        onKeyDown={onDraftKeyDown}
+                        placeholder='Ask Codex...'
+                        aria-label='Ask Codex'
+                        spellCheck={true}
+                    />
+                    <select
+                        className='h-12 max-w-24 shrink-0 rounded-full bg-transparent px-2 text-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring'
+                        value={selectedEffort}
+                        disabled={sending || status.running}
+                        onChange={(event) => void updateCodexSettings({ effort: event.target.value || null })}
+                        aria-label='Codex reasoning effort'
+                        title='Reasoning effort'>
+                        {effortOptions.map((option) => (
+                            <option key={option.value} value={option.value}>{formatCodexEffortLabel(option.value)}</option>
+                        ))}
+                    </select>
+                    {status.running ? (
+                        <Button
+                            type='button'
+                            size='icon'
+                            className='h-12 w-12 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90'
+                            onClick={() => void stopTurn()}
+                            aria-label='Stop Codex turn'>
+                            <Square className='h-4 w-4 fill-current' />
+                        </Button>
+                    ) : (
+                        <Button
+                            type='button'
+                            size='icon'
+                            className='h-12 w-12 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90'
+                            disabled={!canSend}
+                            onClick={() => void submit()}
+                            aria-label='Send Codex message'>
+                            {sending ? <Loader2 className='h-5 w-5 animate-spin' /> : <ArrowUp className='h-5 w-5' />}
+                        </Button>
+                    )}
+                </div>
+            </div>
+            <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                className='absolute right-3 top-4 h-8 w-8 rounded-full text-muted-foreground'
+                onClick={() => onOpenChange(false)}
+                aria-label='Close Codex chat'>
+                <X className='h-4 w-4' />
+            </Button>
+        </>
+    );
+
+    return (
+        <>
+            <aside
+                aria-label='Codex chat'
+                aria-hidden={!dockOpen}
+                inert={!dockOpen}
+                data-state={dockOpen ? "open" : "closed"}
+                className='docs-chat-dock'
+                style={{ width: dockOpen ? displayedPanelWidth : 0 }}
+                onKeyDown={(event) => {
+                    if (event.key === "Escape" && !event.defaultPrevented) {
+                        event.preventDefault();
+                        onOpenChange(false);
+                    }
+                }}>
+                {!expanded && (
+                    <div
+                        className='docs-chat-dock-content relative flex h-full min-w-0 flex-col overflow-hidden border-l bg-background'
+                        style={{ width: displayedPanelWidth }}>
+                        {renderChatContent(false)}
+                    </div>
+                )}
+            </aside>
+            {expanded && (
+                <Dialog open={open} onOpenChange={onOpenChange}>
+                    <DialogContent
+                        showCloseButton={false}
+                        aria-describedby={undefined}
+                        data-chat-mode='full'
+                        className='docs-chat-dialog inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none sm:rounded-none'
+                        onOpenAutoFocus={(event) => {
+                            event.preventDefault();
+                            draftRef.current?.focus();
+                        }}
+                        onCloseAutoFocus={(event) => {
+                            event.preventDefault();
+                            launcherRef.current?.focus();
+                        }}>
+                        {renderChatContent(true)}
+                    </DialogContent>
+                </Dialog>
+            )}
+            {!open && (
+                <div className='fixed bottom-4 right-4 z-50'>
+                    <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    ref={launcherRef}
+                                    type='button'
                                     size='icon'
                                     className='h-11 w-11 rounded-full shadow-lg'
                                     onClick={() => onOpenChange(true)}
+                                    aria-keyshortcuts='Meta+Shift+L'
                                     aria-label='Open Codex chat'>
-                                    {status.running ? (
-                                        <Loader2 className='h-5 w-5 animate-spin' />
-                                    ) : (
-                                        <MessageSquareText className='h-5 w-5' />
-                                    )}
+                                    {status.running ? <Loader2 className='h-5 w-5 animate-spin' /> : <MessageSquareText className='h-5 w-5' />}
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent side='left'>Codex</TooltipContent>
+                            <TooltipContent side='left'>Codex · ⌘⇧L</TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                 </div>
@@ -9152,7 +9253,7 @@ function normalizeCodexChatMessages(messages: CodexChatMessage[] | undefined) {
     if (!Array.isArray(messages)) return [];
 
     return messages
-        .map((message) => {
+        .map((message): CodexChatMessage | null => {
             const role =
                 message.role === "assistant" || message.role === "system" || message.role === "user"
                     ? message.role
@@ -9164,6 +9265,8 @@ function normalizeCodexChatMessages(messages: CodexChatMessage[] | undefined) {
                 id: typeof message.id === "string" && message.id ? message.id : createClientId(),
                 role,
                 content,
+                kind: message.kind === "reasoning" || message.kind === "commentary" ? message.kind : "answer",
+                turnId: typeof message.turnId === "string" ? message.turnId : undefined,
             };
         })
         .filter((message): message is CodexChatMessage => Boolean(message));
