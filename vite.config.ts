@@ -21,6 +21,8 @@ import {
 import type { AllDocsData } from "./src/types";
 import { getCodexAppResourceDirs, resolveCodexCommand } from "./scripts/codex-command";
 import { createManagedCodexBridge, stopCodexProcess } from "./scripts/codex-process";
+import { deleteCodexSession, isSmoothDocsCodexSession } from "./scripts/codex-session";
+import { CodexSessionTitles, generateCodexSessionTitle } from "./scripts/codex-session-title";
 import {
   CodexMessageStream,
   extractCodexThreadMessages,
@@ -71,6 +73,8 @@ type CodexJsonRpcMessage = {
 
 type CodexChatEvent =
   | { type: "status"; status: CodexChatStatus }
+  | { type: "sessionDeleted"; threadId: string; status: CodexChatStatus }
+  | { type: "sessionRenamed"; threadId: string; name: string }
   | ({ type: "message" } & CodexChatMessageUpdate)
   | { type: "done"; status: CodexChatStatus }
   | { type: "error"; message: string; status: CodexChatStatus };
@@ -527,8 +531,10 @@ class CodexChatBridge {
   private startPromise: Promise<void> | null = null;
   private stderrTail = "";
   private disposed = false;
+  private deletingSession = false;
   private shutdown: Promise<void> = Promise.resolve();
   private threadId: string | null = null;
+  private titles: CodexSessionTitles;
 
   constructor(
     private options: {
@@ -536,7 +542,19 @@ class CodexChatBridge {
       serviceName: string;
       previousShutdown: Promise<void>;
     },
-  ) {}
+  ) {
+    this.titles = new CodexSessionTitles({
+      cwd: options.cwd,
+      request: (method, params) => this.sendRequest(method, params),
+      generate: (excerpt, signal) => {
+        const command = resolveCodexCommand();
+        if (!command) throw new Error("Could not find the Codex CLI for session titles");
+        return generateCodexSessionTitle({ command, env: getCodexProcessEnv(command), model: this.selectedModel, excerpt, signal });
+      },
+      onUpdated: (threadId, name) => this.broadcast({ type: "sessionRenamed", threadId, name }),
+      onError: (error) => console.warn("[smooth-docs] Could not generate a session title:", error instanceof Error ? error.message : error),
+    });
+  }
 
   getStatus(): CodexChatStatus {
     return {
@@ -564,11 +582,12 @@ class CodexChatBridge {
     this.threadId = null;
     this.activeTurnId = null;
     this.failAll(new Error("Codex app-server closed"));
-    this.shutdown = Promise.all([this.options.previousShutdown, stopCodexProcess(child)]).then(() => {});
+    this.shutdown = Promise.all([this.options.previousShutdown, stopCodexProcess(child), this.titles.dispose()]).then(() => {});
     return this.shutdown;
   }
 
   async sendMessage(request: CodexChatMessageRequest) {
+    if (this.deletingSession) throw new Error("A session is being deleted. Please try again.");
     const text = request.text.trim();
     if (!text) {
       throw new Error("Message is required");
@@ -579,6 +598,7 @@ class CodexChatBridge {
     }
 
     await this.ensureReady();
+    if (this.deletingSession) throw new Error("A session is being deleted. Please try again.");
 
     if (!this.threadId) {
       throw new Error("Codex thread is not ready");
@@ -612,6 +632,7 @@ class CodexChatBridge {
   }
 
   async resetThread() {
+    if (this.deletingSession) throw new Error("A session is being deleted. Please try again.");
     this.threadId = null;
     this.activeTurnId = null;
     this.lastError = "";
@@ -683,6 +704,7 @@ class CodexChatBridge {
   }
 
   async resumeThread(threadId: string): Promise<CodexSessionResumeResult> {
+    if (this.deletingSession) throw new Error("A session is being deleted. Please try again.");
     if (!threadId) {
       throw new Error("Thread id is required");
     }
@@ -692,6 +714,7 @@ class CodexChatBridge {
     }
 
     await this.ensureInitialized();
+    if (this.deletingSession) throw new Error("A session is being deleted. Please try again.");
 
     const params: Record<string, unknown> = { threadId };
     if (this.selectedModel) params.model = this.selectedModel;
@@ -704,11 +727,53 @@ class CodexChatBridge {
     this.activeTurnId = null;
     this.lastError = "";
     const messages = await this.readThreadMessages(this.threadId, thread);
+    void this.titles.schedule(this.threadId);
     this.broadcast({ type: "status", status: this.getStatus() });
     return {
       status: this.getStatus(),
       messages,
     };
+  }
+
+  async deleteSession(threadId: string) {
+    if (this.deletingSession) throw new Error("A session is already being deleted");
+    this.deletingSession = true;
+    try {
+      this.titles.cancel(threadId);
+      await this.ensureInitialized();
+      await deleteCodexSession({
+        threadId,
+        cwd: this.options.cwd,
+        request: (method, params) => this.sendRequest(method, params),
+        isRunning: () => this.activeTurnId !== null,
+      });
+      this.forgetSession(threadId);
+      // With no open conversation, release the worker and its remaining caches.
+      // The next user action starts it again through ensureInitialized().
+      if (!this.threadId && this.pendingRequests.size === 0) {
+        const child = this.child;
+        this.child = null;
+        this.initialized = false;
+        this.contextUsageByThread.clear();
+        this.messageStream.reset();
+        await stopCodexProcess(child);
+      }
+      return { threadId, status: this.getStatus() };
+    } finally {
+      this.deletingSession = false;
+    }
+  }
+
+  private forgetSession(threadId: string) {
+    this.titles.cancel(threadId);
+    this.contextUsageByThread.delete(threadId);
+    if (this.threadId === threadId) {
+      this.threadId = null;
+      this.activeTurnId = null;
+      this.lastError = "";
+      this.messageStream.reset();
+    }
+    this.broadcast({ type: "sessionDeleted", threadId, status: this.getStatus() });
   }
 
   async stopActiveTurn() {
@@ -917,6 +982,17 @@ class CodexChatBridge {
   }
 
   private handleNotification(method: string, params: Record<string, unknown>) {
+    if (method === "thread/name/updated") {
+      const threadId = getString(params.threadId);
+      const name = getString(params.threadName);
+      if (threadId && name) this.broadcast({ type: "sessionRenamed", threadId, name });
+      return;
+    }
+    if (method === "thread/deleted") {
+      const threadId = getString(params.threadId);
+      if (threadId) this.forgetSession(threadId);
+      return;
+    }
     if (method === "thread/tokenUsage/updated") {
       const threadId = getString(params.threadId);
       const usage = normalizeCodexContextUsage(params.tokenUsage);
@@ -948,6 +1024,7 @@ class CodexChatBridge {
       this.messageStream.reset();
       this.activeTurnId = null;
       this.broadcast({ type: "done", status: this.getStatus() });
+      if (this.threadId) void this.titles.schedule(this.threadId);
       return;
     }
 
@@ -1068,17 +1145,6 @@ function extractOriginalCodexUserRequest(value: string) {
   const markerIndex = value.lastIndexOf(marker);
   if (markerIndex === -1) return value.trim();
   return value.slice(markerIndex + marker.length).trim();
-}
-
-function isSmoothDocsCodexSession(value: unknown, cwd: string) {
-  const thread = getObject(value);
-  if (!thread) return false;
-
-  const threadCwd = getString(thread.cwd);
-  if (threadCwd && path.resolve(threadCwd) === path.resolve(cwd)) return true;
-
-  const preview = getString(thread.preview) ?? "";
-  return preview.includes("You are being prompted from the Smooth Docs Kit browser preview.");
 }
 
 function getObject(value: unknown) {
@@ -1483,14 +1549,23 @@ async function handleCodexChatRequest(
   }
 
   if (url.pathname === "/__smooth-docs/codex/session") {
-    if (req.method !== "POST") {
+    if (req.method !== "POST" && req.method !== "DELETE") {
       sendJson(res, 405, { error: "Method not allowed" });
       return;
     }
 
+    if (req.method === "DELETE") {
+      const protocol = (req.socket as { encrypted?: boolean }).encrypted ? "https:" : "http:";
+      if (!req.headers.host || req.headers.origin !== `${protocol}//${req.headers.host}`) {
+        sendJson(res, 403, { error: "The request origin is not accepted" });
+        return;
+      }
+    }
     const body = await readJsonBody(req);
     const threadId = typeof body.threadId === "string" ? body.threadId : "";
-    const result = await codexChatBridge.resumeThread(threadId);
+    const result = req.method === "DELETE"
+      ? await codexChatBridge.deleteSession(threadId)
+      : await codexChatBridge.resumeThread(threadId);
     sendJson(res, 200, result);
     return;
   }
@@ -2436,6 +2511,9 @@ function docsManualChunks(id: string) {
 
 export default defineConfig({
   plugins: [docsContentPlugin(), react()],
+  // Separate projects can run concurrently without invalidating each other's
+  // optimized React dependencies and causing invalid-hook-call errors.
+  cacheDir: path.join(path.dirname(path.dirname(docsConfig.generatedAllDir)), "vite"),
   resolve: {
     alias: {
       "@": docsConfig.theme.sourceDir,
