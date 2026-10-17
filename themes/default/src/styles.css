@@ -1,3 +1,5 @@
+@import "@xyflow/react/dist/base.css";
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -33,6 +35,10 @@
         --sidebar-border: 0 0% 89.8%;
         --sidebar-ring: 0 0% 70.8%;
         --docs-mermaid-background: 0 0% 97%;
+        --docs-flow-surface: var(--card);
+        --docs-flow-surface-foreground: var(--card-foreground);
+        --docs-flow-line: var(--muted-foreground);
+        --docs-flow-error: var(--destructive);
     }
 
     .dark {
@@ -64,6 +70,10 @@
         --sidebar-border: 0 0% 100% / 10%;
         --sidebar-ring: 0 0% 55.6%;
         --docs-mermaid-background: 0 0% 6.9%;
+        --docs-flow-surface: var(--card);
+        --docs-flow-surface-foreground: var(--card-foreground);
+        --docs-flow-line: var(--muted-foreground);
+        --docs-flow-error: var(--destructive);
     }
 
     * {
@@ -157,6 +167,92 @@
         animation: docs-dialog-content-out 100ms ease-in;
     }
 
+    @keyframes docs-chat-full-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    @keyframes docs-chat-full-out {
+        from { opacity: 1; }
+        to { opacity: 0; }
+    }
+
+    .docs-dialog-content.docs-chat-dialog {
+        transform: none;
+        animation: none;
+    }
+
+    .docs-chat-dialog[data-chat-mode="full"][data-state="open"] {
+        animation: docs-chat-full-in 140ms ease-out;
+    }
+
+    .docs-chat-dialog[data-chat-mode="full"][data-state="closed"] {
+        animation: docs-chat-full-out 120ms ease-in;
+    }
+
+    .docs-sidebar-resizer.docs-chat-resizer[data-side="right"] {
+        display: block;
+        left: 0;
+        transform: none;
+        touch-action: none;
+    }
+
+    .docs-chat-resizer::after {
+        left: 0;
+        transform: none;
+    }
+
+    .docs-chat-dock {
+        position: sticky;
+        top: 0;
+        align-self: flex-start;
+        flex-shrink: 0;
+        height: 100dvh;
+        overflow: hidden;
+        transition: width 220ms cubic-bezier(0.25, 1, 0.5, 1);
+    }
+
+    .docs-chat-dock-content {
+        opacity: 1;
+        transition: opacity 160ms ease;
+    }
+
+    .docs-chat-dock[data-state="closed"] .docs-chat-dock-content {
+        opacity: 0;
+    }
+
+    .docs-sidebar-resizing .docs-chat-dock {
+        transition: none !important;
+    }
+
+    @media (max-width: 767px) {
+        .docs-chat-dock {
+            position: relative;
+            height: 0;
+        }
+
+        .docs-chat-dock[data-state="open"] {
+            flex-basis: 100%;
+            width: 100% !important;
+            height: 70dvh;
+        }
+
+        .docs-chat-resizer {
+            display: none !important;
+        }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        .docs-chat-dialog[data-chat-mode][data-state] {
+            animation: none;
+        }
+
+        .docs-chat-dock,
+        .docs-chat-dock-content {
+            transition: none;
+        }
+    }
+
     @keyframes docs-command-dialog-in {
         from {
             opacity: 0;
@@ -201,6 +297,77 @@
 }
 
 @layer components {
+    .docs-flow-loading {
+        @apply my-6 rounded-xl border bg-muted/30 px-4 py-10 text-center text-sm text-muted-foreground;
+    }
+
+    .docs-flow-canvas .react-flow__node:focus-visible,
+    .docs-flow-canvas .react-flow__edge:focus-visible {
+        outline: 2px solid hsl(var(--ring));
+        outline-offset: 3px;
+    }
+
+    .docs-flow-canvas .react-flow__attribution {
+        @apply rounded-tl bg-background/80 px-1.5 py-0.5 text-[0.6rem] text-muted-foreground;
+    }
+
+    .docs-flow-canvas .react-flow__edge.animated path {
+        animation-duration: 1.4s;
+    }
+
+    .docs-flow-canvas .react-flow__edgelabel-renderer {
+        z-index: 20 !important;
+    }
+
+    .docs-flow-canvas .react-flow__node.docs-flow-story-active {
+        filter: drop-shadow(0 0 0.45rem hsl(var(--primary) / 0.35));
+    }
+
+    .docs-flow-canvas .react-flow__node.docs-flow-story-active > div {
+        box-shadow: 0 0 0 3px hsl(var(--primary));
+    }
+
+    .docs-flow-canvas .react-flow__edge.docs-flow-story-active path {
+        stroke: hsl(var(--primary));
+        stroke-width: 3;
+    }
+
+    .docs-flow-canvas[data-story-motion="animated"] .docs-flow-story-active {
+        transition: filter 180ms ease, opacity 180ms ease;
+    }
+
+    .docs-flow-canvas[data-story-motion="animated"] .docs-flow-story-current > div {
+        animation: docs-flow-story-node-pulse 900ms ease-in-out infinite alternate;
+    }
+
+    .docs-flow-canvas[data-story-motion="animated"] .docs-flow-edge-path--current {
+        animation: docs-flow-story-edge-travel 900ms linear infinite;
+    }
+
+    .docs-flow-canvas[data-story-motion="instant"] .docs-flow-story-active {
+        transition: none !important;
+    }
+
+    @keyframes docs-flow-story-edge-travel {
+        to { stroke-dashoffset: -34; }
+    }
+
+    @keyframes docs-flow-story-node-pulse {
+        from { box-shadow: 0 0 0 2px hsl(var(--primary)); }
+        to { box-shadow: 0 0 0 5px hsl(var(--primary) / 0.45); }
+    }
+
+    .docs-reduce-motion .docs-flow-canvas .react-flow__edge.animated path {
+        animation: none !important;
+    }
+
+    @media (max-width: 640px) {
+        .docs-flow-canvas {
+            min-height: 20rem;
+            max-height: 70vh;
+        }
+    }
+
     .docs-settings-dialog aside {
         position: relative;
     }
@@ -558,6 +725,13 @@
 
     .docs-article-active-footer {
         @apply fixed bottom-3 left-3 right-3 z-40 flex h-10 items-center justify-center;
+        right: calc(var(--docs-active-bar-content-right, 0px) + 0.75rem);
+    }
+
+    @media (max-width: 767px) {
+        [data-chat-open="true"] .docs-article-active-footer {
+            display: none;
+        }
     }
 
     @media (min-width: 1024px) {
@@ -908,6 +1082,20 @@
         color: inherit;
     }
 
+    [data-mermaid-theme="github"] {
+        --docs-mermaid-bg: var(--docs-mermaid-light-bg);
+        --docs-mermaid-fg: var(--docs-mermaid-light-fg);
+        --docs-mermaid-line: var(--docs-mermaid-light-line);
+        --docs-mermaid-accent: var(--docs-mermaid-light-accent);
+    }
+
+    .dark [data-mermaid-theme="github"] {
+        --docs-mermaid-bg: var(--docs-mermaid-dark-bg);
+        --docs-mermaid-fg: var(--docs-mermaid-dark-fg);
+        --docs-mermaid-line: var(--docs-mermaid-dark-line);
+        --docs-mermaid-accent: var(--docs-mermaid-dark-accent);
+    }
+
     .docs-prose .beautiful-mermaid,
     .docs-prose .mermaid {
         --beautiful-mermaid-autonumber-bg: hsl(var(--docs-mermaid-background));
@@ -1040,6 +1228,7 @@
 
     .docs-prose .docs-mermaid-zoomable {
         @apply cursor-zoom-in focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+        padding-top: max(2.5rem, var(--docs-mermaid-padding, 1rem));
     }
 
     .docs-prose .docs-mermaid-zoomable:hover {
@@ -1052,23 +1241,31 @@
 
     .docs-prose .beautiful-mermaid svg,
     .docs-prose .mermaid svg {
+        @apply mx-auto h-auto max-w-full;
+    }
+
+    .docs-prose .beautiful-mermaid svg:not([data-mermaid-theme]),
+    .docs-prose .mermaid svg:not([data-mermaid-theme]) {
         --muted: hsl(var(--foreground)) !important;
         --_text: hsl(var(--foreground)) !important;
         --_text-sec: hsl(var(--foreground)) !important;
         --_text-muted: hsl(var(--foreground)) !important;
         --_text-faint: hsl(var(--foreground)) !important;
-        @apply mx-auto h-auto max-w-full;
     }
 
-    .docs-prose .docs-mermaid-copy-image {
+    .docs-prose .docs-mermaid-copy {
         @apply absolute right-2 top-2 z-10 inline-flex h-8 w-8 items-center justify-center rounded-md border bg-background/90 text-muted-foreground shadow-sm backdrop-blur transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
     }
 
-    .docs-prose .docs-mermaid-copy-image[data-copied="true"] {
+    .docs-prose .docs-mermaid-copy[data-format="svg"] {
+        @apply right-12 w-auto gap-1.5 px-2 text-xs font-medium;
+    }
+
+    .docs-prose .docs-mermaid-copy[data-copied="true"] {
         @apply text-foreground;
     }
 
-    .docs-prose .docs-mermaid-copy-image svg {
+    .docs-prose .docs-mermaid-copy svg {
         display: block;
         height: 1rem;
         margin: 0;
@@ -1113,15 +1310,18 @@
     }
 
     .mermaid-zoom-surface svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        max-width: none;
+    }
+
+    .mermaid-zoom-surface svg:not([data-mermaid-theme]) {
         --muted: hsl(var(--foreground)) !important;
         --_text: hsl(var(--foreground)) !important;
         --_text-sec: hsl(var(--foreground)) !important;
         --_text-muted: hsl(var(--foreground)) !important;
         --_text-faint: hsl(var(--foreground)) !important;
-        display: block;
-        width: 100%;
-        height: 100%;
-        max-width: none;
     }
 
     .docs-prose .beautiful-mermaid .beautiful-mermaid-autonumber circle,
@@ -1133,7 +1333,7 @@
     }
 
     .docs-chat-markdown {
-        @apply min-w-0 max-w-none text-sm leading-6;
+        @apply min-w-0 max-w-none text-base leading-7;
         overflow-wrap: anywhere;
         white-space: normal;
     }

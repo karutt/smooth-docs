@@ -1,5 +1,6 @@
 export type {
   AllDocsData,
+  CompiledFlow,
   DocPage,
   DocsData,
   NavItem,

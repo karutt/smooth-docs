@@ -1,9 +1,11 @@
 import * as React from "react";
 import { docsDataBySite as initialDocsDataBySite } from "#docs-data";
 import {
+    ArrowUp,
     Bot,
     BookOpen,
     CheckCircle2,
+    ChevronDown,
     ChevronRight,
     Circle,
     Code2,
@@ -15,8 +17,10 @@ import {
     Inbox,
     Layout,
     Loader2,
+    Menu,
     MessageSquareText,
     Maximize2,
+    Minimize2,
     Minus,
     Moon,
     Palette,
@@ -25,7 +29,6 @@ import {
     Pin,
     Plus,
     RotateCcw,
-    Send,
     Settings as SettingsIcon,
     Square,
     Sun,
@@ -54,6 +57,7 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -79,7 +83,6 @@ import { Badge } from "@/components/ui/badge";
 import {
     Sidebar as SidebarRoot,
     SidebarContent,
-    SidebarFooter,
     SidebarGroup,
     SidebarGroupContent,
     SidebarGroupLabel,
@@ -92,18 +95,23 @@ import {
     SidebarMenuSubItem,
     SidebarProvider,
     SidebarTrigger,
-    useSidebar,
 } from "@/components/ui/sidebar";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Toggle } from "@/components/ui/toggle";
-import type { AllDocsData, DocPage, DocsData, NavItem, SiteKey } from "@/types";
+import type { AllDocsData, CompiledFlow, DocPage, DocsData, NavItem, SiteKey } from "@/types";
 import { cn } from "@/lib/utils";
+import { resolveDocsNavigation } from "@/lib/docs-navigation";
+import { makeMermaidSvgPortable } from "@/lib/mermaid-svg";
+import { CodexChatMessages } from "@/components/CodexChatMessages";
+import { CodexContextUsageIndicator } from "@/components/CodexContextUsage";
+import { upsertCodexChatMessage, type CodexChatMessage, type CodexChatMessageUpdate, type CodexContextUsage } from "../../../src/codex-chat";
 import "katex/dist/katex.min.css";
 import { toast } from "sonner";
 
 type Theme = "dark" | "light";
 
 const ActionCommandDialog = React.lazy(() => import("@/components/ActionCommandDialog"));
+const DocsFlowBlock = React.lazy(() => import("@/components/docs-flow/DocsFlowBlock"));
 const DOCS_THEME_STORAGE_KEY = "smooth-docs-docs-theme";
 
 type RouteState = {
@@ -117,7 +125,10 @@ type DocsContentUpdatePayload = {
     refreshThemeStylesheet?: boolean;
 };
 
-type ArticleBlock = { type: "html"; html: string } | { type: "accordion"; data: DocsAccordionData };
+type ArticleBlock =
+    | { type: "html"; html: string }
+    | { type: "accordion"; data: DocsAccordionData }
+    | { type: "flow"; id: string; data: CompiledFlow };
 
 type DocsAccordionData = {
     multiple: boolean;
@@ -177,12 +188,6 @@ type PinToastState = {
     message: string;
 };
 
-type CodexChatMessage = {
-    id: string;
-    role: "assistant" | "system" | "user";
-    content: string;
-};
-
 type CodexChatStatus = {
     available: boolean;
     running: boolean;
@@ -190,6 +195,7 @@ type CodexChatStatus = {
     lastError: string;
     selectedEffort: string | null;
     selectedModel: string | null;
+    contextUsage: CodexContextUsage | null;
 };
 
 type CodexContextBlock = {
@@ -388,7 +394,7 @@ const PIN_STORAGE_KEY = "smooth-docs-kit-pin-blocks";
 const UI_SETTINGS_STORAGE_KEY = "smooth-docs-kit-ui-settings";
 const READ_PAGES_STORAGE_PREFIX = "smooth-docs-kit-read-pages";
 const DOCS_DRAG_MIME = "application/x-smooth-docs-source-paths";
-const MERMAID_COPY_BUTTON_CLASS = "docs-mermaid-copy-image";
+const MERMAID_COPY_BUTTON_CLASS = "docs-mermaid-copy";
 const MERMAID_COPY_ICON =
     '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
 const MERMAID_EXPORT_BASE_COLOR_VARS = [
@@ -420,7 +426,14 @@ const MERMAID_EXPORT_DERIVED_COLOR_VARS = [
 const PIN_FONT_STEP_KEY = "smooth-docs-kit-pin-font-step";
 const PIN_PANEL_WIDTH_KEY = "smooth-docs-kit-pin-panel-width";
 const LEFT_SIDEBAR_WIDTH_KEY = "smooth-docs-kit-left-sidebar-width";
+const LEFT_SIDEBAR_OPEN_KEY = "smooth-docs-kit-left-sidebar-open";
 const TOC_PANEL_WIDTH_KEY = "smooth-docs-kit-toc-panel-width";
+const CODEX_CHAT_WIDTH_KEY = "smooth-docs-kit-codex-chat-width";
+const CODEX_CHAT_SESSION_KEY = "smooth-docs-kit-codex-chat-session";
+const CODEX_CHAT_OPEN_KEY = "smooth-docs-kit-codex-chat-open";
+const DEFAULT_CODEX_CHAT_WIDTH = 480;
+const MIN_CODEX_CHAT_WIDTH = 320;
+const MAX_CODEX_CHAT_WIDTH = 960;
 const MAX_PINNED_BLOCKS = 6;
 const DEFAULT_LEFT_SIDEBAR_WIDTH = 264;
 const MIN_LEFT_SIDEBAR_WIDTH = 220;
@@ -569,7 +582,7 @@ export function App() {
     });
     const [headerVisible, setHeaderVisible] = React.useState(true);
     const [zenMode, setZenMode] = React.useState(false);
-    const [sidebarOpen, setSidebarOpen] = React.useState(true);
+    const [sidebarOpen, setSidebarOpen] = React.useState(() => readStorageValue(LEFT_SIDEBAR_OPEN_KEY) !== "false");
     const [leftSidebarWidth, setLeftSidebarWidth] = React.useState(() => readLeftSidebarWidth());
     const [tocPanelWidth, setTocPanelWidth] = React.useState(() => readTocPanelWidth());
 
@@ -594,7 +607,7 @@ export function App() {
     const [pinnedBlocks, setPinnedBlocks] = React.useState<PinnedBlock[]>(() =>
         readPinnedBlocks(pinPageKey),
     );
-    const [codexChatOpen, setCodexChatOpen] = React.useState(false);
+    const [codexChatOpen, setCodexChatOpen] = React.useState(() => import.meta.env.DEV && readStorageValue(CODEX_CHAT_OPEN_KEY) === "true");
     const [codexContextBlocks, setCodexContextBlocks] = React.useState<CodexContextBlock[]>([]);
     const [pinMenu, setPinMenu] = React.useState<PinMenuRequest | null>(null);
     const [docsEntryMenu, setDocsEntryMenu] =
@@ -620,6 +633,13 @@ export function App() {
         () => new Set(docsData.pages.map((page) => page.url)),
         [docsData.pages],
     );
+    const pageUrlsBySite = React.useMemo(
+        () => Object.fromEntries(Object.entries(liveDocsDataBySite).map(([site, data]) => [
+            site,
+            new Set(data.pages.map((page) => page.url)),
+        ])),
+        [liveDocsDataBySite],
+    );
     const inboxUnreadCount = React.useMemo(
         () => countUnreadInboxItems(docsData.pages, readPageUrls),
         [docsData.pages, readPageUrls],
@@ -637,7 +657,6 @@ export function App() {
         [currentPage, docsData.nav, route.site],
     );
     const hasPinnedBlocks = pinnedBlocks.length > 0;
-    const hasDocsSidePanel = hasPinnedBlocks || tableOfContents.length > 0;
     const canSwitchDocsTheme = true;
     const canEditMarkdown =
         import.meta.env.DEV &&
@@ -645,7 +664,7 @@ export function App() {
         isDocsMarkdownSourcePath(currentPage.sourcePath);
     const canCopyCurrentPagePath =
         import.meta.env.DEV && currentPage.absolutePath.trim().length > 0;
-    const canRenderDocsSidePanel = !zenMode && !editMode && hasDocsSidePanel;
+    const canRenderDocsSidePanel = !zenMode && !editMode;
     const rightSidebarOpen = canRenderDocsSidePanel && uiSettings.showRightSidebar;
     const rightPanelOpen = rightSidebarOpen;
 
@@ -926,13 +945,33 @@ export function App() {
 
     const navigateTo = React.useCallback(
         (url: string, nextSite = route.site) => {
-            const nextPath = normalizePath(url);
-            history.pushState(null, "", toSiteUrl(nextSite, nextPath));
+            const destination = new URL(url, location.origin);
+            const nextPath = normalizePath(decodePathname(destination.pathname));
+            history.pushState(null, "", `${toSiteUrl(nextSite, nextPath)}${destination.search}${destination.hash}`);
             setRoute({ site: nextSite, pagePath: nextPath });
             window.scrollTo({ top: 0, behavior: "instant" });
         },
         [route.site],
     );
+
+    const onDocsLinkClick = React.useCallback((event: React.MouseEvent) => {
+        if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+        if (!(anchor instanceof HTMLAnchorElement) || anchor.hasAttribute("download")) return;
+        if (anchor.target && anchor.target.toLowerCase() !== "_self") return;
+        if (anchor.relList.contains("external")) return;
+
+        const destination = resolveDocsNavigation(anchor.href, location.href, route.site, pageUrlsBySite);
+        if (!destination) return;
+        event.preventDefault();
+        navigateTo(`${destination.pagePath}${destination.search}${destination.hash}`, destination.site);
+    }, [navigateTo, pageUrlsBySite, route.site]);
+
+    React.useLayoutEffect(() => {
+        if (!location.hash) return;
+        const heading = document.getElementById(decodePathname(location.hash.slice(1)));
+        heading?.scrollIntoView({ block: "start", behavior: "instant" });
+    }, [route]);
 
     const selectPageSourcePath = React.useCallback(
         (
@@ -1754,6 +1793,14 @@ export function App() {
     }, [uiSettings]);
 
     React.useEffect(() => {
+        writeStorageValue(LEFT_SIDEBAR_OPEN_KEY, String(sidebarOpen));
+    }, [sidebarOpen]);
+
+    React.useEffect(() => {
+        if (import.meta.env.DEV) writeStorageValue(CODEX_CHAT_OPEN_KEY, String(codexChatOpen));
+    }, [codexChatOpen]);
+
+    React.useEffect(() => {
         const onPopState = () => setRoute(readRoute());
         window.addEventListener("popstate", onPopState);
         return () => window.removeEventListener("popstate", onPopState);
@@ -1769,6 +1816,14 @@ export function App() {
                 event.stopPropagation();
                 event.stopImmediatePropagation();
                 if (!event.repeat) toggleRightSidebar();
+                return;
+            }
+
+            if (import.meta.env.DEV && primary && event.shiftKey && !event.altKey && code === "KeyL") {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                if (!event.repeat) setCodexChatOpen((current) => !current);
                 return;
             }
 
@@ -1933,7 +1988,9 @@ export function App() {
 
     return (
         <SidebarProvider
-            className={cn(uiSettings.reduceMotion && "docs-reduce-motion")}
+            className={cn(uiSettings.reduceMotion && "docs-reduce-motion", codexChatOpen && "max-md:flex-wrap")}
+            data-chat-open={codexChatOpen ? "true" : undefined}
+            onClick={onDocsLinkClick}
             open={sidebarOpen}
             onOpenChange={setSidebarOpen}
             style={{ "--sidebar-width": `${leftSidebarWidth}px` } as React.CSSProperties}>
@@ -1952,7 +2009,6 @@ export function App() {
                     onMoveMarkdown={moveMarkdownFiles}
                     onNavigate={(url) => navigateTo(url)}
                     onPageSelect={selectPageSourcePath}
-                    onSettingsOpen={() => setSettingsOpen(true)}
                     onWidthChange={updateLeftSidebarWidth}
                     pageUrls={pageUrls}
                     selectedSourcePaths={selectedSourcePaths}
@@ -2071,11 +2127,11 @@ export function App() {
                 tocPanelWidth={tocPanelWidth}
             />
 
-            <SidebarInset>
+            <SidebarInset className={codexChatOpen ? "max-md:w-full max-md:flex-none" : undefined}>
                 {!zenMode && (
                     <header
                         className={cn(
-                            "sticky top-0 z-40 border-b bg-background/95 transition-[transform,opacity] duration-300 ease-out",
+                            "docs-site-header sticky top-0 z-40 border-b bg-background/95 transition-[transform,opacity] duration-300 ease-out",
                             headerVisible
                                 ? "translate-y-0 opacity-100"
                                 : "-translate-y-full opacity-0",
@@ -2094,25 +2150,11 @@ export function App() {
                                     canEditMarkdown={canEditMarkdown}
                                     editMode={editMode}
                                     onEditModeToggle={toggleEditMode}
+                                    onSettingsOpen={() => setSettingsOpen(true)}
+                                    onThemeToggle={toggleTheme}
                                     page={currentPage}
+                                    theme={theme}
                                 />
-                                <SiteToggle site={route.site} onSiteChange={switchSite} />
-
-                                <Button
-                                    variant='ghost'
-                                    size='icon'
-                                    onClick={toggleTheme}
-                                    aria-label={
-                                        theme === "dark"
-                                            ? "Switch to light theme"
-                                            : "Switch to dark theme"
-                                    }>
-                                    {theme === "dark" ? (
-                                        <Sun className='h-4 w-4' />
-                                    ) : (
-                                        <Moon className='h-4 w-4' />
-                                    )}
-                                </Button>
                             </div>
                         </div>
                     </header>
@@ -2210,21 +2252,7 @@ export function App() {
                             </div>
                         </div>
 
-                        {import.meta.env.DEV ? (
-                            <CodexChatWidget
-                                contextBlocks={codexContextBlocks}
-                                currentPage={currentPage}
-                                onContextBlockRemove={(id) =>
-                                    setCodexContextBlocks((current) =>
-                                        current.filter((block) => block.id !== id),
-                                    )
-                                }
-                                onContextBlocksClear={() => setCodexContextBlocks([])}
-                                onOpenChange={setCodexChatOpen}
-                                open={codexChatOpen}
-                                site={route.site}
-                            />
-                        ) : null}
+
 
                         {rightSidebarOpen && hasPinnedBlocks ? (
                             <PinnedBlocksPanel
@@ -2253,6 +2281,23 @@ export function App() {
                     </div>
                 </main>
             </SidebarInset>
+
+            {import.meta.env.DEV ? (
+                <CodexChatWidget
+                    contextBlocks={codexContextBlocks}
+                    currentPage={currentPage}
+                    leftSidebarWidth={!zenMode && sidebarOpen ? leftSidebarWidth : 0}
+                    onContextBlockRemove={(id) =>
+                        setCodexContextBlocks((current) =>
+                            current.filter((block) => block.id !== id),
+                        )
+                    }
+                    onContextBlocksClear={() => setCodexContextBlocks([])}
+                    onOpenChange={setCodexChatOpen}
+                    open={codexChatOpen}
+                    site={route.site}
+                />
+            ) : null}
 
             <PinContextMenu
                 canAddContext={import.meta.env.DEV}
@@ -2403,14 +2448,15 @@ function TableOfContents({
         };
     }, [items]);
 
-    if (items.length === 0) return null;
-
     const content = (
         <>
             <div className='mb-3 flex items-center gap-2 text-sm font-medium text-muted-foreground'>
                 <BookOpen className='h-4 w-4' />
                 <span>On this page</span>
             </div>
+            {items.length === 0 && (
+                <p className='text-sm text-muted-foreground'>No headings on this page.</p>
+            )}
             <ol className='space-y-1'>
                 {items.map((item) => (
                     <li key={item.id}>
@@ -2488,11 +2534,13 @@ function TableOfContents({
 
 function SidebarWidthResizer({
     ariaLabel,
+    className,
     onWidthChange,
     side,
     width,
 }: {
     ariaLabel: string;
+    className?: string;
     onWidthChange: (width: number) => void;
     side: "left" | "right";
     width: number;
@@ -2565,11 +2613,13 @@ function SidebarWidthResizer({
             role='separator'
             aria-label={ariaLabel}
             aria-orientation='vertical'
-            className='docs-sidebar-resizer'
+            aria-valuenow={Math.round(width)}
+            className={cn("docs-sidebar-resizer", className)}
             data-side={side}
             tabIndex={0}
             onKeyDown={resizeWithKeyboard}
             onPointerCancel={endResize}
+            onLostPointerCapture={endResize}
             onPointerDown={beginResize}
             onPointerMove={updateResize}
             onPointerUp={endResize}
@@ -3235,6 +3285,7 @@ function PinToast({ onDone, toast }: { onDone: () => void; toast: PinToastState 
 function CodexChatWidget({
     contextBlocks,
     currentPage,
+    leftSidebarWidth,
     onContextBlockRemove,
     onContextBlocksClear,
     onOpenChange,
@@ -3243,6 +3294,7 @@ function CodexChatWidget({
 }: {
     contextBlocks: CodexContextBlock[];
     currentPage: DocPage;
+    leftSidebarWidth: number;
     onContextBlockRemove: (id: string) => void;
     onContextBlocksClear: () => void;
     onOpenChange: (open: boolean) => void;
@@ -3250,15 +3302,28 @@ function CodexChatWidget({
     site: SiteKey;
 }) {
     const [draft, setDraft] = React.useState("");
+    const [expanded, setExpanded] = React.useState(false);
+    const [panelWidth, setPanelWidth] = React.useState(() => {
+        const saved = Number.parseInt(readStorageValue(CODEX_CHAT_WIDTH_KEY) ?? "", 10);
+        return Number.isFinite(saved)
+            ? clamp(saved, MIN_CODEX_CHAT_WIDTH, MAX_CODEX_CHAT_WIDTH)
+            : DEFAULT_CODEX_CHAT_WIDTH;
+    });
+    const [viewportWidth, setViewportWidth] = React.useState(() => window.innerWidth);
+    const dockWidthLimit = viewportWidth < 768
+        ? viewportWidth
+        : Math.max(MIN_CODEX_CHAT_WIDTH, viewportWidth - (viewportWidth >= 1024 ? leftSidebarWidth : 0) - 320);
+    const displayedPanelWidth = viewportWidth < 768 ? viewportWidth : Math.min(panelWidth, dockWidthLimit);
     const [messages, setMessages] = React.useState<CodexChatMessage[]>([]);
     const [models, setModels] = React.useState<CodexModelOption[]>([]);
     const [modelsLoading, setModelsLoading] = React.useState(false);
-    const [panelMounted, setPanelMounted] = React.useState(open);
-    const [panelVisible, setPanelVisible] = React.useState(open);
     const [sending, setSending] = React.useState(false);
     const [sessions, setSessions] = React.useState<CodexSessionSummary[]>([]);
     const [sessionsLoading, setSessionsLoading] = React.useState(false);
     const [sessionsOpen, setSessionsOpen] = React.useState(false);
+    const [sessionLoading, setSessionLoading] = React.useState(false);
+    const [sessionReady, setSessionReady] = React.useState(false);
+    const [statusLoaded, setStatusLoaded] = React.useState(false);
     const [status, setStatus] = React.useState<CodexChatStatus>({
         available: true,
         running: false,
@@ -3266,35 +3331,27 @@ function CodexChatWidget({
         lastError: "",
         selectedEffort: null,
         selectedModel: null,
+        contextUsage: null,
     });
     const assistantMessageIdRef = React.useRef<string | null>(null);
+    const previousSessionRef = React.useRef(readStorageValue(CODEX_CHAT_SESSION_KEY));
+    const restoreStartedRef = React.useRef(false);
+    const draftRef = React.useRef<HTMLTextAreaElement>(null);
+    const launcherRef = React.useRef<HTMLButtonElement>(null);
     const endRef = React.useRef<HTMLDivElement>(null);
 
     const appendMessage = React.useCallback((message: CodexChatMessage) => {
         setMessages((current) => [...current, message]);
     }, []);
 
-    const appendAssistantDelta = React.useCallback((text: string) => {
+    const updateAssistantMessage = React.useCallback(({ message, append }: CodexChatMessageUpdate) => {
+        const placeholderId = assistantMessageIdRef.current;
         setMessages((current) => {
-            const assistantId = assistantMessageIdRef.current ?? createClientId();
-            assistantMessageIdRef.current = assistantId;
-            const existingIndex = current.findIndex((message) => message.id === assistantId);
-
-            if (existingIndex === -1) {
-                return [
-                    ...current,
-                    {
-                        id: assistantId,
-                        role: "assistant",
-                        content: text,
-                    },
-                ];
-            }
-
-            return current.map((message, index) =>
-                index === existingIndex
-                    ? { ...message, content: `${message.content}${text}` }
-                    : message,
+            if (!message.content && !current.some((entry) => entry.id === message.id)) return current;
+            return upsertCodexChatMessage(
+                current.filter((entry) => entry.id !== placeholderId || entry.content),
+                message,
+                append,
             );
         });
     }, []);
@@ -3312,17 +3369,21 @@ function CodexChatWidget({
 
         const onStatus = (event: MessageEvent<string>) => {
             const data = readData<CodexChatStatus>(event);
-            if (data) setStatus(data);
+            if (data) {
+                setStatus(data);
+                setStatusLoaded(true);
+            }
         };
 
-        const onDelta = (event: MessageEvent<string>) => {
-            const data = readData<{ text?: string }>(event);
-            if (data?.text) appendAssistantDelta(data.text);
+        const onMessage = (event: MessageEvent<string>) => {
+            const data = readData<CodexChatMessageUpdate>(event);
+            if (data?.message) updateAssistantMessage(data);
         };
 
         const onDone = (event: MessageEvent<string>) => {
             const data = readData<{ status?: CodexChatStatus }>(event);
             if (data?.status) setStatus(data.status);
+            setMessages((current) => current.filter((entry) => entry.content));
             assistantMessageIdRef.current = null;
         };
 
@@ -3339,7 +3400,7 @@ function CodexChatWidget({
         };
 
         source.addEventListener("status", onStatus);
-        source.addEventListener("delta", onDelta);
+        source.addEventListener("message", onMessage);
         source.addEventListener("done", onDone);
         source.addEventListener("error", onCodexError);
         source.onerror = () => {
@@ -3353,35 +3414,54 @@ function CodexChatWidget({
 
         return () => {
             source.removeEventListener("status", onStatus);
-            source.removeEventListener("delta", onDelta);
+            source.removeEventListener("message", onMessage);
             source.removeEventListener("done", onDone);
             source.removeEventListener("error", onCodexError);
             source.close();
         };
-    }, [appendAssistantDelta, appendMessage]);
+    }, [updateAssistantMessage, appendMessage]);
 
     React.useEffect(() => {
         if (!open) return;
         endRef.current?.scrollIntoView({ block: "end" });
-    }, [messages, open, status.running]);
+    }, [expanded, messages, open, status.running]);
+
+    React.useLayoutEffect(() => {
+        const input = draftRef.current;
+        if (!input) return;
+        input.style.height = "0px";
+        input.style.height = `${Math.min(Math.max(input.scrollHeight, 40), 192)}px`;
+    }, [draft, expanded, open, displayedPanelWidth, viewportWidth]);
+
+    React.useLayoutEffect(() => {
+        if (open) setExpanded(false);
+    }, [open]);
 
     React.useEffect(() => {
-        if (open) {
-            setPanelMounted(true);
-            const frame = window.requestAnimationFrame(() => setPanelVisible(true));
-            return () => window.cancelAnimationFrame(frame);
-        }
+        if (open && !expanded) draftRef.current?.focus({ preventScroll: window.innerWidth >= 768 });
+    }, [expanded, open]);
 
-        setPanelVisible(false);
-        const timer = window.setTimeout(() => setPanelMounted(false), 200);
-        return () => window.clearTimeout(timer);
-    }, [open]);
+    React.useEffect(() => {
+        const updateViewportWidth = () => setViewportWidth(window.innerWidth);
+        window.addEventListener("resize", updateViewportWidth);
+        return () => window.removeEventListener("resize", updateViewportWidth);
+    }, []);
+
+    const updatePanelWidth = React.useCallback((width: number) => {
+        const next = Math.round(clamp(
+            width,
+            MIN_CODEX_CHAT_WIDTH,
+            Math.max(MIN_CODEX_CHAT_WIDTH, Math.min(MAX_CODEX_CHAT_WIDTH, dockWidthLimit)),
+        ));
+        setPanelWidth(next);
+        writeStorageValue(CODEX_CHAT_WIDTH_KEY, String(next));
+    }, [dockWidthLimit]);
 
     const loadModels = React.useCallback(async () => {
         setModelsLoading(true);
 
         try {
-            const response = await fetch("/__smooth-docs/codex/models", { method: "GET" });
+            const response = await fetch("/__smooth-docs/codex/models", { method: "GET", cache: "no-store" });
             const data = (await response.json().catch(() => ({}))) as {
                 models?: CodexModelOption[];
                 status?: CodexChatStatus;
@@ -3393,7 +3473,7 @@ function CodexChatWidget({
             }
 
             setModels(Array.isArray(data.models) ? data.models : []);
-            if (data.status) setStatus(data.status);
+            if (data.status) setStatus((current) => mergeCodexResponseStatus(current, data.status!));
         } catch (error) {
             appendMessage({
                 id: createClientId(),
@@ -3435,7 +3515,7 @@ function CodexChatWidget({
                     throw new Error(data.error ?? "Failed to update Codex settings");
                 }
 
-                setStatus((current) => ({ ...current, ...data }));
+                setStatus((current) => mergeCodexResponseStatus(current, data));
             } catch (error) {
                 appendMessage({
                     id: createClientId(),
@@ -3477,9 +3557,9 @@ function CodexChatWidget({
     }, [appendMessage]);
 
     React.useEffect(() => {
-        if (!open || models.length > 0 || modelsLoading) return;
+        if (!open) return;
         void loadModels();
-    }, [loadModels, models.length, modelsLoading, open]);
+    }, [loadModels, open]);
 
     const toggleSessions = React.useCallback(() => {
         setSessionsOpen((current) => {
@@ -3492,6 +3572,10 @@ function CodexChatWidget({
     const resumeSession = React.useCallback(
         async (threadId: string) => {
             if (status.running) return;
+
+            restoreStartedRef.current = true;
+            setSessionLoading(true);
+            setSessionReady(false);
 
             try {
                 const response = await fetch("/__smooth-docs/codex/session", {
@@ -3508,7 +3592,7 @@ function CodexChatWidget({
                 setMessages(normalizeCodexChatMessages(data.messages));
                 assistantMessageIdRef.current = null;
                 if (data.status) {
-                    setStatus((current) => ({ ...current, ...data.status }));
+                    setStatus((current) => mergeCodexResponseStatus(current, data.status!));
                 }
                 setSessionsOpen(false);
             } catch (error) {
@@ -3517,10 +3601,30 @@ function CodexChatWidget({
                     role: "system",
                     content: error instanceof Error ? error.message : "Failed to resume session",
                 });
+            } finally {
+                setSessionLoading(false);
+                setSessionReady(true);
             }
         },
         [appendMessage, status.running],
     );
+
+    React.useEffect(() => {
+        if (!open || !statusLoaded || status.running || restoreStartedRef.current) return;
+        restoreStartedRef.current = true;
+        const threadId = previousSessionRef.current || status.threadId;
+        if (threadId) {
+            void resumeSession(threadId);
+        } else {
+            setSessionReady(true);
+        }
+    }, [open, resumeSession, status.running, status.threadId, statusLoaded]);
+
+    React.useEffect(() => {
+        if (!sessionReady || sessionLoading || !status.threadId) return;
+        previousSessionRef.current = status.threadId;
+        writeStorageValue(CODEX_CHAT_SESSION_KEY, status.threadId);
+    }, [sessionLoading, sessionReady, status.threadId]);
 
     const stopTurn = React.useCallback(async () => {
         if (!status.running) return;
@@ -3536,7 +3640,7 @@ function CodexChatWidget({
             }
 
             assistantMessageIdRef.current = null;
-            setStatus((current) => ({ ...current, ...data, running: false }));
+            setStatus((current) => ({ ...mergeCodexResponseStatus(current, data), running: false }));
         } catch (error) {
             appendMessage({
                 id: createClientId(),
@@ -3548,7 +3652,7 @@ function CodexChatWidget({
 
     const submit = React.useCallback(async () => {
         const text = draft.trim();
-        if (!text || sending || status.running) return;
+        if (!text || sending || status.running || sessionLoading || !sessionReady) return;
 
         const assistantId = createClientId();
         assistantMessageIdRef.current = assistantId;
@@ -3625,13 +3729,18 @@ function CodexChatWidget({
         currentPage.url,
         draft,
         sending,
+        sessionLoading,
+        sessionReady,
         site,
         status.running,
     ]);
 
     const reset = React.useCallback(async () => {
-        if (status.running) return;
+        if (status.running || sessionLoading) return;
 
+        restoreStartedRef.current = true;
+        setSessionReady(false);
+        setSessionLoading(true);
         setMessages([]);
         assistantMessageIdRef.current = null;
 
@@ -3643,7 +3752,7 @@ function CodexChatWidget({
             if (!response.ok) {
                 throw new Error(data.error ?? "Failed to reset Codex chat");
             }
-            setStatus((current) => ({ ...current, ...data }));
+            setStatus((current) => mergeCodexResponseStatus(current, data));
         } catch (error) {
             const message = error instanceof Error ? error.message : "Failed to reset Codex chat";
             appendMessage({
@@ -3651,8 +3760,11 @@ function CodexChatWidget({
                 role: "system",
                 content: message,
             });
+        } finally {
+            setSessionLoading(false);
+            setSessionReady(true);
         }
-    }, [appendMessage, status.running]);
+    }, [appendMessage, sessionLoading, status.running]);
 
     const onDraftKeyDown = React.useCallback(
         (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -3675,298 +3787,329 @@ function CodexChatWidget({
         currentModel?.defaultEffort ||
         effortOptions[0]?.value ||
         "";
-    const chatLabel = status.running ? "Working" : status.lastError ? "Offline" : "Ready";
-    const canSend = draft.trim().length > 0 && !sending && !status.running;
-    const showPanel = open || panelMounted;
+    const canSend = draft.trim().length > 0 && !sending && !status.running && !sessionLoading && sessionReady;
 
-    return (
+    const dockOpen = open && !expanded;
+    const renderChatContent = (fullScreen: boolean) => (
         <>
-            {showPanel ? (
-                <section
-                    aria-label='Codex chat'
-                    className={cn(
-                        "fixed bottom-4 right-4 top-4 z-50 flex w-[min(440px,calc(100vw-2rem))] flex-col overflow-hidden rounded-xl border bg-background shadow-2xl transition-[opacity,transform] duration-200 ease-out motion-reduce:transition-none",
-                        panelVisible
-                            ? "translate-x-0 opacity-100"
-                            : "pointer-events-none translate-x-6 opacity-0",
-                    )}>
-                    <div className='flex h-12 shrink-0 items-center gap-2 border-b px-3'>
-                        <Bot className='h-4 w-4 text-muted-foreground' />
-                        <div className='min-w-0 flex-1'>
-                            <div className='truncate text-sm font-medium'>Codex</div>
-                            <div className='truncate text-xs text-muted-foreground'>
-                                {chatLabel}
-                            </div>
-                        </div>
-                        <TooltipProvider delayDuration={300}>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        onClick={toggleSessions}
-                                        aria-label='Show Codex sessions'>
-                                        <PanelRight className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Sessions</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        disabled={!status.running}
-                                        onClick={() => void stopTurn()}
-                                        aria-label='Stop Codex turn'>
-                                        <Square className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Stop</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        disabled={status.running}
-                                        onClick={() => void reset()}
-                                        aria-label='New Codex thread'>
-                                        <RotateCcw className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>New thread</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button
-                                        type='button'
-                                        variant='ghost'
-                                        size='icon'
-                                        className='h-8 w-8'
-                                        onClick={() => onOpenChange(false)}
-                                        aria-label='Close Codex chat'>
-                                        <X className='h-3.5 w-3.5' />
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Close</TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                    </div>
-
-                    <div className='grid shrink-0 gap-2 border-b p-2 sm:grid-cols-[minmax(0,1fr)_10rem]'>
-                        <select
-                            className='h-8 min-w-0 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                            value={selectedModel}
-                            disabled={modelsLoading || status.running}
-                            onChange={(event) => {
-                                const model = event.target.value || null;
-                                const nextModel = models.find((item) => item.model === model);
-                                void updateCodexSettings({
-                                    model,
-                                    effort: nextModel?.defaultEffort ?? selectedEffort,
-                                });
-                            }}
-                            aria-label='Codex model'>
-                            {models.length === 0 ? (
-                                <option value=''>
-                                    {modelsLoading ? "Loading models..." : "Default model"}
-                                </option>
-                            ) : (
-                                models.map((model) => (
-                                    <option key={model.id} value={model.model}>
-                                        {model.displayName}
-                                    </option>
-                                ))
-                            )}
-                        </select>
-                        <select
-                            className='h-8 min-w-0 rounded-md border bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
-                            value={selectedEffort}
-                            disabled={status.running}
-                            onChange={(event) =>
-                                void updateCodexSettings({ effort: event.target.value || null })
-                            }
-                            aria-label='Codex reasoning effort'>
-                            {effortOptions.map((option) => (
-                                <option key={option.value} value={option.value}>
-                                    {formatCodexEffortLabel(option.value)}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-
-                    {sessionsOpen && (
-                        <div className='max-h-52 shrink-0 overflow-y-auto border-b p-2'>
-                            <div className='mb-2 flex items-center justify-between gap-2'>
-                                <span className='text-xs font-medium text-muted-foreground'>
-                                    Sessions
-                                </span>
-                                <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='sm'
-                                    className='h-7 px-2 text-xs'
-                                    disabled={sessionsLoading}
-                                    onClick={() => void loadSessions()}>
-                                    Refresh
-                                </Button>
-                            </div>
-                            {sessionsLoading ? (
-                                <div className='py-3 text-center text-xs text-muted-foreground'>
-                                    Loading...
-                                </div>
-                            ) : sessions.length === 0 ? (
-                                <div className='py-3 text-center text-xs text-muted-foreground'>
-                                    No sessions
-                                </div>
-                            ) : (
-                                <div className='space-y-1'>
-                                    {sessions.map((session) => (
-                                        <button
-                                            key={session.id}
-                                            type='button'
-                                            className={cn(
-                                                "flex w-full min-w-0 flex-col rounded-md border px-2 py-1.5 text-left text-xs transition-colors hover:bg-accent hover:text-accent-foreground",
-                                                session.id === status.threadId && "bg-accent",
-                                            )}
-                                            disabled={status.running}
-                                            onClick={() => void resumeSession(session.id)}>
-                                            <span className='truncate font-medium'>
-                                                {session.name}
-                                            </span>
-                                            <span className='truncate text-muted-foreground'>
-                                                {formatCodexSessionTimestamp(session.updatedAt)} ·{" "}
-                                                {session.status}
-                                            </span>
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    <div className='flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3'>
-                        {messages.length === 0 ? (
-                            <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
-                                No messages yet
-                            </div>
-                        ) : (
-                            messages.map((message) => (
-                                <div
-                                    key={message.id}
-                                    className={cn(
-                                        "flex",
-                                        message.role === "user" ? "justify-end" : "justify-start",
-                                    )}>
-                                    <div
-                                        className={cn(
-                                            "max-w-[85%] rounded-md border px-3 py-2 text-sm leading-6",
-                                            message.role === "user"
-                                                ? "border-primary bg-primary text-primary-foreground"
-                                                : message.role === "system"
-                                                  ? "border-destructive/40 bg-destructive/10 text-destructive"
-                                                  : "bg-card text-card-foreground",
-                                        )}>
-                                        {message.content ? (
-                                            <ChatMarkdownMessage content={message.content} />
-                                        ) : (
-                                            <span className='inline-flex items-center gap-2 text-muted-foreground'>
-                                                <Loader2 className='h-3.5 w-3.5 animate-spin' />
-                                                Working
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            ))
-                        )}
-                        <div ref={endRef} />
-                    </div>
-
-                    {status.lastError && (
-                        <div className='border-t px-3 py-2 text-xs text-destructive'>
-                            {status.lastError}
-                        </div>
-                    )}
-
-                    <div className='border-t p-3'>
-                        {contextBlocks.length > 0 && (
-                            <div className='mb-2 flex flex-wrap items-center gap-1.5'>
-                                {contextBlocks.map((block) => (
-                                    <span
-                                        key={block.id}
-                                        className='inline-flex max-w-full items-center gap-1 rounded-md border bg-muted px-2 py-1 text-xs text-muted-foreground'>
-                                        <FileText className='h-3 w-3 shrink-0' />
-                                        <span className='max-w-40 truncate'>{block.label}</span>
-                                        <button
-                                            type='button'
-                                            className='rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
-                                            onClick={() => onContextBlockRemove(block.id)}
-                                            aria-label={`Remove Codex context: ${block.label}`}>
-                                            <X className='h-3 w-3' />
-                                        </button>
-                                    </span>
-                                ))}
-                                <Button
-                                    type='button'
-                                    variant='ghost'
-                                    size='sm'
-                                    className='h-7 px-2 text-xs'
-                                    onClick={onContextBlocksClear}>
-                                    Clear
-                                </Button>
-                            </div>
-                        )}
-                        <div className='flex items-end gap-2'>
-                            <textarea
-                                className='max-h-32 min-h-20 flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm leading-5 outline-none transition-colors placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring'
-                                value={draft}
-                                onChange={(event) => setDraft(event.target.value)}
-                                onKeyDown={onDraftKeyDown}
-                                placeholder='Ask Codex...'
-                                spellCheck={true}
-                            />
-                            <Button
-                                type='button'
-                                size='icon'
-                                className='h-10 w-10 shrink-0'
-                                disabled={!canSend}
-                                onClick={() => void submit()}
-                                aria-label='Send Codex message'>
-                                {sending || status.running ? (
-                                    <Loader2 className='h-4 w-4 animate-spin' />
-                                ) : (
-                                    <Send className='h-4 w-4' />
-                                )}
-                            </Button>
-                        </div>
-                    </div>
-                </section>
-            ) : (
-                <div className='fixed bottom-4 right-4 z-50 flex max-w-[calc(100vw-2rem)] flex-col items-end gap-3'>
+            {!fullScreen && (
+                <SidebarWidthResizer
+                    ariaLabel='Resize Codex chat panel'
+                    className='docs-chat-resizer'
+                    side='right'
+                    width={displayedPanelWidth}
+                    onWidthChange={updatePanelWidth}
+                />
+            )}
+            <header className={cn(
+                "docs-chat-header flex h-16 shrink-0 items-center justify-between gap-3",
+                fullScreen ? "px-4 pr-14 sm:px-8 sm:pr-16" : "px-3 pr-12",
+            )}>
+                <div className='flex min-w-0 items-center gap-2'>
+                    {fullScreen ? (
+                        <DialogTitle className='text-sm font-medium'>Codex</DialogTitle>
+                    ) : <h2 className='text-sm font-medium'>Codex</h2>}
+                    <Button
+                        type='button'
+                        variant='ghost'
+                        size='icon'
+                        className='h-8 w-8 shrink-0 text-muted-foreground'
+                        disabled={modelsLoading || status.running}
+                        onClick={() => void loadModels()}
+                        aria-label='Refresh Codex models'
+                        title='Refresh models'>
+                        <RotateCcw className={cn("h-3.5 w-3.5", modelsLoading && "animate-spin")} />
+                    </Button>
+                </div>
+                <div className='flex shrink-0 items-center gap-1'>
                     <TooltipProvider delayDuration={300}>
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
                                     type='button'
+                                    variant='ghost'
+                                    size='icon'
+                                    className='h-9 w-9 rounded-full text-muted-foreground'
+                                    onClick={toggleSessions}
+                                    aria-label='Show Codex sessions'
+                                    aria-expanded={sessionsOpen}>
+                                    <PanelRight className='h-4 w-4' />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Sessions</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='icon'
+                                    className='h-9 w-9 rounded-full text-muted-foreground'
+                                disabled={sending || status.running || sessionLoading}
+                                    onClick={() => void reset()}
+                                    aria-label='New Codex thread'>
+                                    <PencilLine className='h-4 w-4' />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>New thread</TooltipContent>
+                        </Tooltip>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type='button'
+                                    variant='ghost'
+                                    size='icon'
+                                    className='h-9 w-9 rounded-full text-muted-foreground'
+                                    onClick={() => setExpanded((current) => !current)}
+                                    aria-label={fullScreen ? "Exit full screen" : "Expand Codex chat"}
+                                    aria-pressed={fullScreen}>
+                                    {fullScreen ? <Minimize2 className='h-4 w-4' /> : <Maximize2 className='h-4 w-4' />}
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>{fullScreen ? "Side panel" : "Full screen"}</TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+            </header>
+
+            {sessionsOpen && (
+                <div
+                    role='region'
+                    aria-label='Codex sessions'
+                    className='docs-chat-sessions absolute right-4 top-16 z-10 max-h-[50vh] w-[calc(100%_-_2rem)] max-w-[26rem] overflow-y-auto overflow-x-hidden rounded-2xl border bg-background p-3 shadow-lg'>
+                    <div className='mb-2 flex items-center justify-between gap-2'>
+                        <span className='text-sm font-medium'>Sessions</span>
+                        <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            className='h-7 px-2 text-xs'
+                            disabled={sessionsLoading}
+                            onClick={() => void loadSessions()}>
+                            Refresh
+                        </Button>
+                    </div>
+                    {sessionsLoading ? (
+                        <div className='py-3 text-center text-sm text-muted-foreground'>Loading...</div>
+                    ) : sessions.length === 0 ? (
+                        <div className='py-3 text-center text-sm text-muted-foreground'>No sessions</div>
+                    ) : (
+                        <div className='space-y-1'>
+                            {sessions.map((session) => (
+                                <button
+                                    key={session.id}
+                                    type='button'
+                                    className={cn(
+                                        "flex w-full min-w-0 flex-col rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
+                                        session.id === status.threadId && "bg-muted",
+                                    )}
+                                    disabled={status.running || sessionLoading}
+                                    onClick={() => void resumeSession(session.id)}>
+                                    <span className='truncate font-medium'>{session.name}</span>
+                                    <span className='truncate text-xs text-muted-foreground'>
+                                        {formatCodexSessionTimestamp(session.updatedAt)} · {session.status}
+                                    </span>
+                                </button>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            <div className='min-h-0 flex-1 overflow-y-auto'>
+                <div className={cn(
+                    "flex min-h-full w-full flex-col gap-8",
+                    fullScreen ? "px-5 py-10 sm:gap-10 sm:px-10 sm:py-16 lg:px-[8vw]" : "px-5 py-6",
+                )}>
+                    {messages.length === 0 ? (
+                        <div className='flex flex-1 items-center justify-center text-xl font-medium text-muted-foreground'>
+                        {sessionLoading || !sessionReady ? "Loading conversation..." : "What can I help with?"}
+                        </div>
+                    ) : (
+                        <CodexChatMessages
+                            messages={messages}
+                            working={sending || status.running}
+                            renderContent={(content) => <ChatMarkdownMessage content={content} />}
+                        />
+                    )}
+                    <div ref={endRef} />
+                </div>
+            </div>
+
+            <div className={cn(
+                "shrink-0 bg-background pt-4",
+                fullScreen ? "px-5 pb-6 sm:px-10 sm:pb-10 lg:px-[8vw]" : "px-4 pb-4",
+            )}>
+                {status.lastError && (
+                    <div className='mb-3 text-sm text-destructive'>{status.lastError}</div>
+                )}
+                {contextBlocks.length > 0 && (
+                    <div className='mb-3 flex flex-wrap items-center gap-1.5'>
+                        {contextBlocks.map((block) => (
+                            <span
+                                key={block.id}
+                                className='inline-flex max-w-full items-center gap-1 rounded-xl bg-muted px-3 py-1.5 text-xs text-muted-foreground'>
+                                <FileText className='h-3 w-3 shrink-0' />
+                                <span className='max-w-40 truncate'>{block.label}</span>
+                                <button
+                                    type='button'
+                                    className='rounded-sm hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+                                    onClick={() => onContextBlockRemove(block.id)}
+                                    aria-label={`Remove Codex context: ${block.label}`}>
+                                    <X className='h-3 w-3' />
+                                </button>
+                            </span>
+                        ))}
+                        <Button type='button' variant='ghost' size='sm' className='h-7 px-2 text-xs' onClick={onContextBlocksClear}>
+                            Clear
+                        </Button>
+                    </div>
+                )}
+                <div className='docs-chat-composer flex w-full min-w-0 flex-col gap-2 rounded-3xl bg-muted/70 p-3 ring-1 ring-border/40 focus-within:ring-border'>
+                    <textarea
+                        ref={draftRef}
+                        rows={1}
+                        className='max-h-48 min-h-10 w-full min-w-0 resize-none bg-transparent px-1 py-2 text-base leading-6 outline-none placeholder:text-muted-foreground'
+                        value={draft}
+                        onChange={(event) => setDraft(event.target.value)}
+                        onKeyDown={onDraftKeyDown}
+                        placeholder='Ask Codex...'
+                        aria-label='Ask Codex'
+                        spellCheck={true}
+                    />
+                    <div className='docs-chat-composer-toolbar flex min-w-0 items-center gap-1'>
+                        <CodexContextUsageIndicator usage={status.contextUsage} />
+                        <div className='ml-auto flex min-w-0 items-center gap-1'>
+                            <div className='relative w-40 min-w-0 shrink text-muted-foreground hover:text-foreground'>
+                                <select
+                                    className='h-9 w-full min-w-0 appearance-none rounded-full bg-transparent pl-3 pr-8 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                                    value={selectedModel}
+                                    disabled={modelsLoading || sending || status.running}
+                                    title={currentModel?.displayName ?? selectedModel}
+                                    onChange={(event) => {
+                                        const model = event.target.value || null;
+                                        const nextModel = models.find((item) => item.model === model);
+                                        void updateCodexSettings({ model, effort: nextModel?.defaultEffort ?? selectedEffort });
+                                    }}
+                                    aria-label='Codex model'>
+                                    {selectedModel && !currentModel && <option value={selectedModel}>{selectedModel}</option>}
+                                    {models.length === 0 ? (
+                                        <option value=''>{modelsLoading ? "Loading models..." : "Default model"}</option>
+                                    ) : models.map((model) => (
+                                        <option key={model.id} value={model.model}>{model.displayName}</option>
+                                    ))}
+                                </select>
+                                <ChevronDown aria-hidden='true' className='pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2' />
+                            </div>
+                            <div className='relative w-20 shrink-0 text-muted-foreground hover:text-foreground'>
+                                <select
+                                    className='h-9 w-full appearance-none rounded-full bg-transparent pl-3 pr-8 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                                    value={selectedEffort}
+                                    disabled={sending || status.running}
+                                    onChange={(event) => void updateCodexSettings({ effort: event.target.value || null })}
+                                    aria-label='Codex reasoning effort'
+                                    title='Reasoning effort'>
+                                    {effortOptions.map((option) => (
+                                        <option key={option.value} value={option.value}>{formatCodexEffortLabel(option.value)}</option>
+                                    ))}
+                                </select>
+                                <ChevronDown aria-hidden='true' className='pointer-events-none absolute right-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2' />
+                            </div>
+                            {status.running ? (
+                                <Button
+                                    type='button'
+                                    size='icon'
+                                    className='h-9 w-9 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90'
+                                    onClick={() => void stopTurn()}
+                                    aria-label='Stop Codex turn'>
+                                    <Square className='h-4 w-4 fill-current' />
+                                </Button>
+                            ) : (
+                                <Button
+                                    type='button'
+                                    size='icon'
+                                    className='h-9 w-9 shrink-0 rounded-full bg-foreground text-background hover:bg-foreground/90'
+                                    disabled={!canSend}
+                                    onClick={() => void submit()}
+                                    aria-label='Send Codex message'>
+                                    {sending ? <Loader2 className='h-5 w-5 animate-spin' /> : <ArrowUp className='h-5 w-5' />}
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <Button
+                type='button'
+                variant='ghost'
+                size='icon'
+                className='docs-chat-close-button absolute right-3 top-4 h-8 w-8 rounded-full text-muted-foreground'
+                onClick={() => onOpenChange(false)}
+                aria-label='Close Codex chat'>
+                <X className='h-4 w-4' />
+            </Button>
+        </>
+    );
+
+    return (
+        <>
+            <aside
+                aria-label='Codex chat'
+                aria-hidden={!dockOpen}
+                inert={!dockOpen}
+                data-state={dockOpen ? "open" : "closed"}
+                className='docs-chat-dock'
+                style={{ width: dockOpen ? displayedPanelWidth : 0 }}
+                onKeyDown={(event) => {
+                    if (event.key === "Escape" && !event.defaultPrevented) {
+                        event.preventDefault();
+                        onOpenChange(false);
+                    }
+                }}>
+                {!expanded && (
+                    <div
+                        className='docs-chat-dock-content relative flex h-full min-w-0 flex-col overflow-hidden border-l bg-background'
+                        style={{ width: displayedPanelWidth }}>
+                        {renderChatContent(false)}
+                    </div>
+                )}
+            </aside>
+            {expanded && (
+                <Dialog open={open} onOpenChange={onOpenChange}>
+                    <DialogContent
+                        showCloseButton={false}
+                        aria-describedby={undefined}
+                        data-chat-mode='full'
+                        className='docs-chat-dialog inset-0 flex h-dvh w-full max-w-none translate-x-0 translate-y-0 flex-col gap-0 overflow-hidden rounded-none border-0 p-0 shadow-none sm:rounded-none'
+                        onOpenAutoFocus={(event) => {
+                            event.preventDefault();
+                            draftRef.current?.focus();
+                        }}
+                        onCloseAutoFocus={(event) => {
+                            event.preventDefault();
+                            launcherRef.current?.focus();
+                        }}>
+                        {renderChatContent(true)}
+                    </DialogContent>
+                </Dialog>
+            )}
+            {!open && (
+                <div className='fixed bottom-4 right-4 z-50'>
+                    <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    ref={launcherRef}
+                                    type='button'
                                     size='icon'
                                     className='h-11 w-11 rounded-full shadow-lg'
                                     onClick={() => onOpenChange(true)}
+                                    aria-keyshortcuts='Meta+Shift+L'
                                     aria-label='Open Codex chat'>
-                                    {status.running ? (
-                                        <Loader2 className='h-5 w-5 animate-spin' />
-                                    ) : (
-                                        <MessageSquareText className='h-5 w-5' />
-                                    )}
+                                    {status.running ? <Loader2 className='h-5 w-5 animate-spin' /> : <MessageSquareText className='h-5 w-5' />}
                                 </Button>
                             </TooltipTrigger>
-                            <TooltipContent side='left'>Codex</TooltipContent>
+                            <TooltipContent side='left'>Codex · ⌘⇧L</TooltipContent>
                         </Tooltip>
                     </TooltipProvider>
                 </div>
@@ -5199,72 +5342,61 @@ function PageHeaderActions({
     canEditMarkdown,
     editMode,
     onEditModeToggle,
+    onSettingsOpen,
+    onThemeToggle,
     page,
+    theme,
 }: {
     canCopyPath: boolean;
     canEditMarkdown: boolean;
     editMode: boolean;
     onEditModeToggle: () => void;
+    onSettingsOpen: () => void;
+    onThemeToggle: () => void;
     page: DocPage;
+    theme: Theme;
 }) {
     return (
-        <TooltipProvider delayDuration={300}>
-            <div className='flex shrink-0 items-center gap-1.5'>
+        <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+                <Button variant='ghost' size='icon' aria-label='Open page menu'>
+                    <Menu className='h-4 w-4' />
+                </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-52'>
                 {import.meta.env.DEV && canEditMarkdown && (
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <Button
-                                variant={editMode ? "default" : "outline"}
-                                size='icon'
-                                className='h-7 w-7'
-                                aria-label={editMode ? "View Markdown" : "Edit Markdown"}
-                                onClick={onEditModeToggle}>
-                                {editMode ? (
-                                    <Eye className='h-3.5 w-3.5' />
-                                ) : (
-                                    <PencilLine className='h-3.5 w-3.5' />
-                                )}
-                            </Button>
-                        </TooltipTrigger>
-                        <TooltipContent side='bottom'>{editMode ? "View" : "Edit"}</TooltipContent>
-                    </Tooltip>
+                    <DropdownMenuItem onSelect={onEditModeToggle}>
+                        {editMode ? <Eye className='h-4 w-4' /> : <PencilLine className='h-4 w-4' />}
+                        {editMode ? "View Markdown" : "Edit Markdown"}
+                    </DropdownMenuItem>
                 )}
-                <DropdownMenu>
-                    <Tooltip>
-                        <TooltipTrigger asChild>
-                            <DropdownMenuTrigger asChild>
-                                <Button
-                                    variant='outline'
-                                    size='icon'
-                                    className='h-7 w-7'
-                                    aria-label='Copy page data'>
-                                    <Copy className='h-3.5 w-3.5' />
-                                </Button>
-                            </DropdownMenuTrigger>
-                        </TooltipTrigger>
-                        <TooltipContent side='bottom'>Copy</TooltipContent>
-                    </Tooltip>
-                    <DropdownMenuContent align='end' className='w-36'>
-                        <DropdownMenuItem
-                            onSelect={() => {
-                                void copyWithToast(page.markdown, "Copied page Markdown.");
-                            }}>
-                            <FileText className='h-3.5 w-3.5 text-muted-foreground' />
-                            Markdown
-                        </DropdownMenuItem>
-                        {import.meta.env.DEV && canCopyPath && (
-                            <DropdownMenuItem
-                                onSelect={() => {
-                                    void copyWithToast(page.absolutePath, "Copied page path.");
-                                }}>
-                                <Folder className='h-3.5 w-3.5 text-muted-foreground' />
-                                Path
-                            </DropdownMenuItem>
-                        )}
-                    </DropdownMenuContent>
-                </DropdownMenu>
-            </div>
-        </TooltipProvider>
+                <DropdownMenuItem
+                    onSelect={() => {
+                        void copyWithToast(page.markdown, "Copied page Markdown.");
+                    }}>
+                    <Copy className='h-4 w-4' />
+                    Copy Markdown
+                </DropdownMenuItem>
+                {import.meta.env.DEV && canCopyPath && (
+                    <DropdownMenuItem
+                        onSelect={() => {
+                            void copyWithToast(page.absolutePath, "Copied page path.");
+                        }}>
+                        <Folder className='h-4 w-4' />
+                        Copy page path
+                    </DropdownMenuItem>
+                )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onSelect={onThemeToggle}>
+                    {theme === "dark" ? <Sun className='h-4 w-4' /> : <Moon className='h-4 w-4' />}
+                    {theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={onSettingsOpen}>
+                    <SettingsIcon className='h-4 w-4' />
+                    Settings
+                </DropdownMenuItem>
+            </DropdownMenuContent>
+        </DropdownMenu>
     );
 }
 
@@ -6082,7 +6214,7 @@ const Article = React.memo(function Article({
 }) {
     const ref = React.useRef<HTMLElement>(null);
     const [mermaidZoom, setMermaidZoom] = React.useState<MermaidZoomState | null>(null);
-    const blocks = React.useMemo(() => parseArticleBlocks(page.html), [page.html]);
+    const blocks = React.useMemo(() => parseArticleBlocks(page.html, page.flows), [page.flows, page.html]);
 
     const openMermaidZoom = React.useCallback((mermaid: Element) => {
         const svg = mermaid.querySelector("svg");
@@ -6114,8 +6246,12 @@ const Article = React.memo(function Article({
             mermaid.setAttribute("aria-label", `Expand Mermaid diagram ${index + 1}`);
             mermaid.setAttribute("title", "Expand Mermaid diagram");
 
-            if (mermaid instanceof HTMLElement && !mermaid.querySelector(`.${MERMAID_COPY_BUTTON_CLASS}`)) {
-                mermaid.append(createMermaidCopyButton(index));
+            if (mermaid instanceof HTMLElement) {
+                for (const format of ["image", "svg"] as const) {
+                    if (!mermaid.querySelector(`.${MERMAID_COPY_BUTTON_CLASS}[data-format="${format}"]`)) {
+                        mermaid.append(createMermaidCopyButton(index, format));
+                    }
+                }
             }
         });
 
@@ -6133,7 +6269,10 @@ const Article = React.memo(function Article({
                 event.preventDefault();
                 event.stopPropagation();
 
-                void copyMermaidDiagramAsImage(mermaid).then((copied) => {
+                const copyDiagram = mermaidCopyButton.dataset.format === "svg"
+                    ? copyMermaidDiagramAsSvg
+                    : copyMermaidDiagramAsImage;
+                void copyDiagram(mermaid).then((copied) => {
                     if (!copied) return;
 
                     mermaidCopyButton.dataset.copied = "true";
@@ -6245,8 +6384,21 @@ const Article = React.memo(function Article({
                             className='contents'
                             dangerouslySetInnerHTML={{ __html: block.html }}
                         />
-                    ) : (
+                    ) : block.type === "accordion" ? (
                         <DocsAccordion key={`accordion-${index}`} data={block.data} />
+                    ) : (
+                        <React.Suspense
+                            key={`flow-${block.id}`}
+                            fallback={
+                                <div
+                                    className='docs-flow-loading not-prose'
+                                    role='status'
+                                    aria-live='polite'>
+                                    Loading workflow…
+                                </div>
+                            }>
+                            <DocsFlowBlock flow={block.data} />
+                        </React.Suspense>
                     ),
                 )}
             </article>
@@ -6302,6 +6454,26 @@ function ArticleActiveBar({
     theme: Theme;
 }) {
     const [openMenu, setOpenMenu] = React.useState<"theme" | "width" | null>(null);
+    const footerRef = React.useRef<HTMLElement>(null);
+
+    React.useLayoutEffect(() => {
+        const footer = footerRef.current;
+        const main = footer?.closest('[data-sidebar="inset"]');
+        if (!footer || !main) return;
+
+        const updateBounds = () => {
+            const right = Math.max(0, document.documentElement.clientWidth - main.getBoundingClientRect().right);
+            footer.style.setProperty("--docs-active-bar-content-right", `${right}px`);
+        };
+        updateBounds();
+        const observer = new ResizeObserver(updateBounds);
+        observer.observe(main);
+        window.addEventListener("resize", updateBounds);
+        return () => {
+            observer.disconnect();
+            window.removeEventListener("resize", updateBounds);
+        };
+    }, []);
 
     React.useEffect(() => {
         if (!canSwitchDocsTheme) return;
@@ -6333,6 +6505,7 @@ function ArticleActiveBar({
 
     return (
         <footer
+            ref={footerRef}
             className='docs-article-active-footer'
             data-menu-open={openMenu ? "true" : undefined}
             style={activeBarStyle}
@@ -6851,8 +7024,12 @@ function DocsAccordion({ data }: { data: DocsAccordionData }) {
     );
 }
 
-function parseArticleBlocks(html: string): ArticleBlock[] {
-    const markerPattern = /<div data-docs-accordion="([^"]+)"><\/div>/g;
+function parseArticleBlocks(
+    html: string,
+    flows?: Record<string, CompiledFlow>,
+): ArticleBlock[] {
+    const markerPattern =
+        /<div data-docs-(accordion|flow)="([^"]+)"(?: data-smooth-flow-id="[^"]+")?><\/div>/g;
     const blocks: ArticleBlock[] = [];
     let cursor = 0;
 
@@ -6861,9 +7038,20 @@ function parseArticleBlocks(html: string): ArticleBlock[] {
             blocks.push({ type: "html", html: html.slice(cursor, match.index) });
         }
 
-        const data = decodeAccordionData(match[1]);
-        if (data) {
-            blocks.push({ type: "accordion", data });
+        if (match[1] === "accordion") {
+            const data = decodeAccordionData(match[2]);
+            if (data) {
+                blocks.push({ type: "accordion", data });
+            } else {
+                blocks.push({ type: "html", html: match[0] });
+            }
+        } else {
+            const data = flows?.[match[2]];
+            if (data) {
+                blocks.push({ type: "flow", id: match[2], data });
+            } else {
+                blocks.push({ type: "html", html: match[0] });
+            }
         }
 
         cursor = match.index + match[0].length;
@@ -6950,14 +7138,90 @@ function getSvgSize(svg: SVGElement): Size {
     };
 }
 
-function createMermaidCopyButton(index: number) {
+function createMermaidCopyButton(index: number, format: "image" | "svg") {
     const button = document.createElement("button");
     button.type = "button";
     button.className = MERMAID_COPY_BUTTON_CLASS;
+    button.dataset.format = format;
     button.innerHTML = MERMAID_COPY_ICON;
-    button.setAttribute("aria-label", `Copy Mermaid diagram ${index + 1} as image`);
-    button.setAttribute("title", "Copy as image");
+    if (format === "svg") {
+        const label = document.createElement("span");
+        label.textContent = "SVG";
+        button.append(label);
+    }
+    const formatLabel = format === "svg" ? "SVG" : "image";
+    button.setAttribute("aria-label", `Copy Mermaid diagram ${index + 1} as ${formatLabel}`);
+    button.setAttribute("title", `Copy as ${formatLabel}`);
     return button;
+}
+
+async function copyMermaidDiagramAsSvg(mermaid: Element) {
+    try {
+        await copy(serializeMermaidDiagramSvg(mermaid));
+        toast.success("Copied Mermaid diagram as SVG.");
+        return true;
+    } catch (error) {
+        toast.error("Copy failed.", {
+            description: getMermaidCopyErrorDescription(error),
+        });
+        return false;
+    }
+}
+
+function serializeMermaidDiagramSvg(mermaid: Element) {
+    const svg = mermaid.querySelector("svg");
+    if (!(svg instanceof SVGSVGElement)) {
+        throw new Error("Mermaid SVG was not found.");
+    }
+
+    const measured = getSvgSize(svg);
+    const size = {
+        width: Math.max(1, measured.width),
+        height: Math.max(1, measured.height),
+    };
+    const clone = cloneMermaidSvgForExport(svg, mermaid, size);
+    const sourceElements = [svg, ...svg.querySelectorAll("*")];
+    const targetElements = [clone, ...clone.querySelectorAll("*")];
+    const presentationProperties = [
+        "fill", "stroke", "stroke-width", "stroke-dasharray", "stroke-dashoffset",
+        "stroke-linecap", "stroke-linejoin", "stroke-miterlimit", "stroke-opacity",
+        "fill-opacity", "opacity", "paint-order", "vector-effect",
+    ];
+    const textProperties = [
+        "font-family", "font-size", "font-weight", "font-style", "letter-spacing",
+        "text-anchor", "dominant-baseline",
+    ];
+
+    // Bake the displayed theme and font into presentation attributes so SVG
+    // viewers and design tools do not need the site's CSS or custom properties.
+    sourceElements.forEach((source, index) => {
+        const target = targetElements[index];
+        if (!(source instanceof SVGElement) || !(target instanceof SVGElement)) return;
+        const style = getComputedStyle(source);
+        const properties = source.matches("text, tspan")
+            ? [...presentationProperties, ...textProperties]
+            : presentationProperties;
+        for (const property of properties) {
+            const value = style.getPropertyValue(property);
+            if (!value) continue;
+            target.style.removeProperty(property);
+            target.setAttribute(property, value);
+        }
+    });
+    clone.querySelectorAll("style").forEach((style) => style.remove());
+    clone.removeAttribute("style");
+    clone.removeAttribute("data-mermaid-theme");
+
+    const background = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+    const viewBox = svg.viewBox.baseVal;
+    background.setAttribute("x", String(viewBox.x));
+    background.setAttribute("y", String(viewBox.y));
+    background.setAttribute("width", String(viewBox.width || size.width));
+    background.setAttribute("height", String(viewBox.height || size.height));
+    background.setAttribute("fill", getMermaidCanvasBackground(mermaid));
+    clone.prepend(background);
+    makeMermaidSvgPortable(clone, svg);
+    return new XMLSerializer().serializeToString(clone);
 }
 
 async function copyMermaidDiagramAsImage(mermaid: Element) {
@@ -7835,29 +8099,6 @@ function truncateText(value: string, maxLength: number) {
     return value.length > maxLength ? `${value.slice(0, maxLength - 1)}...` : value;
 }
 
-function SiteToggle({
-    site,
-    onSiteChange,
-}: {
-    site: SiteKey;
-    onSiteChange: (site: SiteKey) => void;
-}) {
-    const nextSite = availableSites.find((candidate) => candidate !== site) ?? site;
-
-    return (
-        <div className='hidden sm:flex' aria-label='Select docs'>
-            <Toggle
-                size='sm'
-                pressed={false}
-                onPressedChange={() => onSiteChange(nextSite)}
-                aria-label={`Switch docs site to ${getSiteLabel(nextSite)}`}
-                className='h-7 min-w-[84px] justify-center bg-accent px-3 text-xs text-accent-foreground hover:bg-accent hover:text-accent-foreground'>
-                {getSiteLabel(site)}
-            </Toggle>
-        </div>
-    );
-}
-
 function isNavFolder(item: NavItem) {
     return item.kind === "folder" || item.children.length > 0;
 }
@@ -8013,7 +8254,6 @@ function DocsSidebar({
     onMoveMarkdown,
     onNavigate,
     onPageSelect,
-    onSettingsOpen,
     onWidthChange,
     pageUrls,
     selectedSourcePaths,
@@ -8035,7 +8275,6 @@ function DocsSidebar({
         sourcePath: string,
         modifiers: { metaKey?: boolean; ctrlKey?: boolean; shiftKey?: boolean },
     ) => void;
-    onSettingsOpen: () => void;
     onWidthChange: (width: number) => void;
     pageUrls: ReadonlySet<string>;
     selectedSourcePaths: ReadonlySet<string>;
@@ -8156,43 +8395,6 @@ function DocsSidebar({
                     onDrop={handleRootDrop}
                 />
             </SidebarContent>
-            <SidebarFooter>
-                <SidebarMenu>
-                    <SidebarMenuItem className='flex min-w-0 items-center gap-1'>
-                        <SidebarMenuButton
-                            className={cn(
-                                "h-auto min-w-0 flex-1 py-2",
-                                isRootDropTarget &&
-                                    "bg-sidebar-accent text-sidebar-accent-foreground ring-2 ring-sidebar-ring",
-                            )}
-                            onClick={() => onNavigate("/")}
-                            onDragLeave={handleRootDragLeave}
-                            onDragOver={handleRootDragOver}
-                            onDrop={handleRootDrop}>
-                            <span className='flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground'>
-                                S
-                            </span>
-                            <span className='flex min-w-0 flex-col'>
-                                <span className='truncate font-semibold leading-none'>
-                                    {siteTitle}
-                                </span>
-                                <span className='mt-1 truncate text-xs font-normal text-sidebar-foreground/60'>
-                                    Markdown static docs
-                                </span>
-                            </span>
-                        </SidebarMenuButton>
-                        <Button
-                            type='button'
-                            variant='ghost'
-                            size='icon'
-                            className='h-9 w-9 shrink-0 text-sidebar-foreground/70 hover:text-sidebar-accent-foreground'
-                            aria-label='Open settings'
-                            onClick={onSettingsOpen}>
-                            <SettingsIcon className='h-4 w-4' />
-                        </Button>
-                    </SidebarMenuItem>
-                </SidebarMenu>
-            </SidebarFooter>
         </SidebarRoot>
     );
 }
@@ -8245,16 +8447,6 @@ function DocsSidebarNav({
     selectedSourcePaths: ReadonlySet<string>;
     wrapText: boolean;
 }) {
-    const { isMobile, setOpenMobile } = useSidebar();
-
-    const navigate = React.useCallback(
-        (url: string) => {
-            onNavigate(url);
-            if (isMobile) setOpenMobile(false);
-        },
-        [isMobile, onNavigate, setOpenMobile],
-    );
-
     return (
         <SidebarMenu>
             {items.map((item) => (
@@ -8268,7 +8460,7 @@ function DocsSidebarNav({
                     item={item}
                     onEntryContextMenu={onEntryContextMenu}
                     onMoveMarkdown={onMoveMarkdown}
-                    onNavigate={navigate}
+                    onNavigate={onNavigate}
                     onPageSelect={onPageSelect}
                     pageUrls={pageUrls}
                     selectedSourcePaths={selectedSourcePaths}
@@ -8420,7 +8612,6 @@ function DocsSidebarNavItem({
                     onClick={handlePageClick}
                     onContextMenu={canManageDocs ? handleContextMenu : undefined}
                     onDragStart={handleDragStart}>
-                    <FileText className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
                     <span
                         className={cn(
                             "min-w-0",
@@ -8457,10 +8648,8 @@ function DocsSidebarNavItem({
                     "flex min-w-0 flex-1 gap-2",
                     wrapText ? "items-start" : "items-center",
                 )}>
-                {isSystemInbox ? (
+                {isSystemInbox && (
                     <Inbox className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
-                ) : (
-                    <Folder className='h-4 w-4 shrink-0 text-sidebar-foreground/70' />
                 )}
                 <span
                     className={cn(
@@ -8665,7 +8854,6 @@ function DocsSidebarSubItem({
                     onClick={handlePageClick}
                     onContextMenu={canManageDocs ? handleContextMenu : undefined}
                     onDragStart={handleDragStart}>
-                    <FileText className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
                     <span
                         className={cn(
                             "min-w-0",
@@ -8702,10 +8890,8 @@ function DocsSidebarSubItem({
                     "flex min-w-0 flex-1 gap-2",
                     wrapText ? "items-start" : "items-center",
                 )}>
-                {isSystemInbox ? (
+                {isSystemInbox && (
                     <Inbox className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
-                ) : (
-                    <Folder className='h-3.5 w-3.5 shrink-0 text-sidebar-foreground/60' />
                 )}
                 <span
                     className={cn(
@@ -9148,11 +9334,19 @@ function createClientId() {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function mergeCodexResponseStatus(current: CodexChatStatus, response: Partial<CodexChatStatus>): CodexChatStatus {
+    const next = { ...current, ...response };
+    // A resume/model response can arrive after a newer usage notification.
+    // Only a thread change or a live status event should clear that measurement.
+    if (next.threadId === current.threadId && !next.contextUsage) next.contextUsage = current.contextUsage;
+    return next;
+}
+
 function normalizeCodexChatMessages(messages: CodexChatMessage[] | undefined) {
     if (!Array.isArray(messages)) return [];
 
     return messages
-        .map((message) => {
+        .map((message): CodexChatMessage | null => {
             const role =
                 message.role === "assistant" || message.role === "system" || message.role === "user"
                     ? message.role
@@ -9164,6 +9358,8 @@ function normalizeCodexChatMessages(messages: CodexChatMessage[] | undefined) {
                 id: typeof message.id === "string" && message.id ? message.id : createClientId(),
                 role,
                 content,
+                kind: message.kind === "reasoning" || message.kind === "commentary" ? message.kind : "answer",
+                turnId: typeof message.turnId === "string" ? message.turnId : undefined,
             };
         })
         .filter((message): message is CodexChatMessage => Boolean(message));

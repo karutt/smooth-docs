@@ -22,6 +22,7 @@ import {
     CommandShortcut,
 } from "@/components/ui/command";
 import type { DocsData, SiteKey } from "@/types";
+import { createPageSearchFilter } from "@/lib/page-search";
 
 type Theme = "dark" | "light";
 
@@ -80,6 +81,11 @@ export default function ActionCommandDialog({
     theme: Theme;
     zenMode: boolean;
 }) {
+    const filter = React.useMemo(
+        () => createPageSearchFilter(docsData.pages),
+        [docsData.pages],
+    );
+
     const run = React.useCallback(
         (action: () => void | Promise<void>) => {
             onOpenChange(false);
@@ -89,7 +95,7 @@ export default function ActionCommandDialog({
     );
 
     return (
-        <CommandDialog open={open} onOpenChange={onOpenChange} title='Smooth Docs actions'>
+        <CommandDialog open={open} onOpenChange={onOpenChange} title='Smooth Docs actions' commandProps={{ filter }}>
             <CommandInput placeholder='Search docs or run an action...' />
             <CommandList>
                 <CommandEmpty>No results found.</CommandEmpty>
@@ -190,7 +196,7 @@ export default function ActionCommandDialog({
                     {docsData.pages.map((page) => (
                         <CommandItem
                             key={page.url}
-                            value={`open ${page.title} ${page.sourcePath}`}
+                            value={`open ${page.title} ${page.sourcePath} ${page.text}`}
                             onSelect={() => run(() => onNavigate(page.url))}>
                             <BookOpen className='h-4 w-4 text-muted-foreground' />
                             <div className='flex min-w-0 flex-col'>

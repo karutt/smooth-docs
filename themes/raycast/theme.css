@@ -31,9 +31,9 @@ html.dark {
     --raycast-bg-card-strong: #1b1c1e;
     --raycast-bg-hover: rgb(24 25 26 / 72%);
     --raycast-bg-selected: rgb(255 99 99 / 15%);
-    --raycast-border: rgb(255 255 255 / 6%);
-    --raycast-border-strong: rgb(255 255 255 / 10%);
-    --raycast-border-hover: rgb(255 255 255 / 15%);
+    --raycast-border: rgb(255 255 255 / 4.5%);
+    --raycast-border-strong: rgb(255 255 255 / 7%);
+    --raycast-border-hover: rgb(255 255 255 / 12%);
     --raycast-text: #ffffff;
     --raycast-text-soft: rgb(255 255 255 / 85%);
     --raycast-text-muted: #9c9c9d;
@@ -49,7 +49,7 @@ html.dark {
         rgb(17 18 20 / 75%) 4.87%,
         rgb(12 13 15 / 90%) 75.88%
     );
-    --raycast-nav-shadow: inset 0 1px 1px rgb(255 255 255 / 15%);
+    --raycast-nav-shadow: inset 0 1px 1px rgb(255 255 255 / 8%);
     --raycast-button-bg: #e6e6e6;
     --raycast-button-fg: #2f3031;
     --raycast-button-shadow:
@@ -75,7 +75,7 @@ html.dark {
     --accent-foreground: 0 0% 100%;
     --destructive: 0 100% 69.4%;
     --destructive-foreground: 0 0% 100%;
-    --border: 195 5% 15%;
+    --border: 220 6.67% 8.82%;
     --input: 0 0% 100% / 5%;
     --ring: 0 100% 69.4%;
     --radius: 0.5rem;
@@ -85,7 +85,7 @@ html.dark {
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 100% 69.4% / 15%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 100% / 6%;
+    --sidebar-border: 220 6.67% 8.82%;
     --sidebar-ring: 0 100% 69.4%;
     --docs-mermaid-background: 210 5% 10%;
 }
@@ -179,13 +179,13 @@ a,
     background-size: 64px 64px;
 }
 
-#root header {
+#root .docs-site-header {
     border-bottom: 0;
     background: transparent;
     color: var(--raycast-text);
 }
 
-#root header > div {
+#root .docs-site-header > div {
     max-width: 1204px;
     height: 60px;
     margin: 0 auto;
@@ -197,33 +197,33 @@ a,
     backdrop-filter: blur(20px);
 }
 
-#root header button,
-#root header [role="button"],
-#root header [data-radix-collection-item] {
+#root .docs-site-header button,
+#root .docs-site-header [role="button"],
+#root .docs-site-header [data-radix-collection-item] {
     border-color: transparent;
     border-radius: var(--raycast-radius-sm);
     color: var(--raycast-text-muted);
     letter-spacing: 0.2px;
 }
 
-#root header button:hover,
-#root header [role="button"]:hover {
+#root .docs-site-header button:hover,
+#root .docs-site-header [role="button"]:hover {
     background: var(--raycast-bg-hover);
     color: var(--raycast-text);
 }
 
-#root header button[aria-label*="theme"],
-#root header button[aria-label*="navigation"],
-#root header button[aria-label*="Toggle"] {
+#root .docs-site-header button[aria-label*="theme"],
+#root .docs-site-header button[aria-label*="navigation"],
+#root .docs-site-header button[aria-label*="Toggle"] {
     width: 36px;
     height: 36px;
     border: 0;
     background: transparent;
 }
 
-#root header .bg-background,
-#root header .bg-popover,
-#root header .bg-card,
+#root .docs-site-header .bg-background,
+#root .docs-site-header .bg-popover,
+#root .docs-site-header .bg-card,
 [data-radix-popper-content-wrapper] > * {
     border-color: var(--raycast-border);
     background: var(--raycast-bg-panel);
@@ -231,6 +231,23 @@ a,
     box-shadow:
         0 10px 38px -10px rgb(14 18 22),
         0 10px 20px -15px rgb(14 18 22 / 80%);
+}
+
+.docs-chat-header {
+    border-bottom: 1px solid var(--raycast-border-strong);
+    background: var(--raycast-bg-panel);
+    color: var(--raycast-text);
+}
+
+.docs-chat-header button,
+.docs-chat-close-button {
+    color: var(--raycast-text-soft);
+}
+
+.docs-chat-header button:hover,
+.docs-chat-close-button:hover {
+    background: rgb(255 255 255 / 8%);
+    color: var(--raycast-text);
 }
 
 [data-sidebar="sidebar"],
@@ -247,7 +264,7 @@ main,
 [data-sidebar="sidebar"] {
     border-color: var(--raycast-border);
     background: linear-gradient(180deg, rgb(17 18 20 / 70%), rgb(7 8 10 / 96%)), var(--raycast-bg);
-    box-shadow: inset -1px 0 var(--raycast-border);
+    box-shadow: none;
     color: var(--raycast-text-muted);
 }
 
@@ -287,7 +304,7 @@ main,
     min-height: 30px;
     border: 1px solid transparent;
     border-radius: var(--raycast-radius-sm);
-    color: var(--raycast-text-muted);
+    color: color-mix(in srgb, var(--raycast-text-muted) 80%, var(--raycast-text));
     font-size: 13px;
     font-weight: 500;
     letter-spacing: 0.2px;
@@ -347,15 +364,16 @@ main,
         0 0 24px rgb(255 99 99 / 22%);
 }
 
-.docs-sidebar-resizer::after,
-.docs-pin-resizer::after {
-    background: var(--raycast-border);
+html .docs-sidebar-resizer::after,
+html .docs-pin-resizer::after {
+    /* The panel border supplies the resting edge. */
+    background: transparent;
 }
 
-.docs-sidebar-resizer:hover::after,
-.docs-sidebar-resizer:focus-visible::after,
-.docs-pin-resizer:hover::after,
-.docs-pin-resizer:focus-visible::after {
+html .docs-sidebar-resizer:hover::after,
+html .docs-sidebar-resizer:focus-visible::after,
+html .docs-pin-resizer:hover::after,
+html .docs-pin-resizer:focus-visible::after {
     background: var(--raycast-red);
 }
 
@@ -388,7 +406,7 @@ main .space-y-4 > .bg-border,
 main .space-y-4 > [data-orientation="horizontal"],
 main [role="none"],
 .bg-border {
-    background-color: var(--raycast-border-strong);
+    background-color: var(--raycast-border);
 }
 
 [aria-label="Breadcrumb"] ol,
@@ -591,7 +609,7 @@ main [aria-label="Breadcrumb"] a:hover {
 }
 
 .docs-prose hr {
-    border-color: var(--raycast-border-strong);
+    border-color: var(--raycast-border);
 }
 
 .docs-prose img {
@@ -635,7 +653,7 @@ html .docs-prose .mermaid {
     border-color: var(--raycast-border);
     border-radius: var(--raycast-radius-md);
     background: rgb(255 255 255 / 5%);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
 }
 
 html .docs-prose figure.docs-code-block {
@@ -832,7 +850,7 @@ html .docs-prose .docs-code-block pre.hljs code {
     border-radius: var(--raycast-radius-md);
     background: rgb(255 255 255 / 3%);
     font-size: 14px;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
 }
 
 .docs-prose .not-prose:has(> table) {
@@ -1101,7 +1119,7 @@ button.bg-primary {
 }
 
 @media (max-width: 768px) {
-    #root header > div {
+    #root .docs-site-header > div {
         height: 64px;
         margin: 0 8px;
         padding: 12px 14px;

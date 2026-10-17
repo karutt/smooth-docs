@@ -29,6 +29,7 @@ html:root {
     --dracula-bg-primary: hsl(48 12% 90%);
     --dracula-bg-secondary: hsl(48 12% 96%);
     --dracula-bg-tertiary: hsl(48 12% 72%);
+    --dracula-border: hsl(48 10% 83%);
     --dracula-bg-overlay: hsl(48 12% 6% / 84%);
     --dracula-code-bg: #fffdf5;
     --dracula-code-fg: #1f1f1f;
@@ -64,7 +65,7 @@ html:root {
     --accent-foreground: 48 12% 18%;
     --destructive: 5 64% 48%;
     --destructive-foreground: 48 12% 96%;
-    --border: 48 12% 72%;
+    --border: 48 10% 83%;
     --input: 48 12% 72%;
     --ring: 252 54% 24%;
     --radius: 0.375rem;
@@ -74,7 +75,7 @@ html:root {
     --sidebar-primary-foreground: 48 12% 96%;
     --sidebar-accent: 48 12% 96%;
     --sidebar-accent-foreground: 48 12% 12%;
-    --sidebar-border: 48 12% 72%;
+    --sidebar-border: 48 10% 83%;
     --sidebar-ring: 252 54% 24%;
     --docs-mermaid-background: 48 12% 96%;
 }
@@ -92,6 +93,7 @@ html.dark {
     --dracula-bg-primary: #282a36;
     --dracula-bg-secondary: #21222c;
     --dracula-bg-tertiary: #44475a;
+    --dracula-border: #363846;
     --dracula-bg-overlay: rgb(25 26 33 / 88%);
     --dracula-selection: #44475a;
     --dracula-code-bg: #21222c;
@@ -119,7 +121,7 @@ html.dark {
     --accent-foreground: 60 30% 96.08%;
     --destructive: 0 100% 67%;
     --destructive-foreground: 60 30% 96%;
-    --border: 231.82 13.92% 30.98%;
+    --border: 232.5 12.9% 24.31%;
     --input: 231.82 13.92% 30.98%;
     --ring: 264.71 89.47% 77.65%;
     --sidebar-background: 231.43 14.89% 18.43%;
@@ -128,7 +130,7 @@ html.dark {
     --sidebar-primary-foreground: 231.43 14.89% 18.43%;
     --sidebar-accent: 234.55 14.29% 15.1%;
     --sidebar-accent-foreground: 60 30% 96.08%;
-    --sidebar-border: 231.82 13.92% 30.98%;
+    --sidebar-border: 232.5 12.9% 24.31%;
     --sidebar-ring: 264.71 89.47% 77.65%;
     --docs-mermaid-background: 234.55 14.29% 15.1%;
 }
@@ -209,7 +211,7 @@ html .docs-prose > .contents > h2 {
     line-height: 1.25;
     margin-top: 2.25em;
     padding-bottom: 0.45rem;
-    border-bottom: 1px solid var(--dracula-bg-tertiary);
+    border-bottom: 1px solid var(--dracula-border);
 }
 
 html .docs-prose > .contents > h3 {
@@ -262,7 +264,7 @@ html .docs-prose a:hover {
 html .docs-prose hr {
     height: 1px;
     border: 0;
-    background: var(--dracula-bg-tertiary);
+    background: var(--dracula-border);
 }
 
 html .docs-left-sidebar,
@@ -270,7 +272,7 @@ html .docs-left-sidebar,
 .docs-pin-panel-desktop {
     background: var(--dracula-bg-primary);
     color: var(--dracula-caption);
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
     font-size: var(--dracula-font-size-sidebar);
 }
 
@@ -278,8 +280,17 @@ html .docs-left-sidebar [data-sidebar="group-label"] {
     color: color-mix(in srgb, var(--dracula-caption) 74%, var(--dracula-bg-primary));
 }
 
-.docs-sidebar-resizer::after {
-    background: var(--dracula-bg-tertiary);
+html .docs-sidebar-resizer::after,
+html .docs-pin-resizer::after {
+    /* The panel border supplies the resting edge. */
+    background: transparent;
+}
+
+html .docs-sidebar-resizer:hover::after,
+html .docs-sidebar-resizer:focus-visible::after,
+html .docs-pin-resizer:hover::after,
+html .docs-pin-resizer:focus-visible::after {
+    background: var(--dracula-color);
 }
 
 html [data-sidebar="menu-button"],
@@ -340,7 +351,7 @@ header,
 .docs-header,
 .docs-topbar {
     background: var(--dracula-bg-primary);
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
     color: var(--dracula-caption);
 }
 
@@ -506,7 +517,7 @@ html .docs-prose figure.docs-code-block {
     position: relative;
     margin-block: 1em;
     overflow: hidden;
-    border: 1px solid var(--dracula-bg-tertiary);
+    border: 1px solid var(--dracula-border);
     border-radius: var(--dracula-radius-sm);
     background: var(--dracula-code-bg);
     color: var(--dracula-code-fg);
@@ -611,7 +622,7 @@ html .docs-prose .docs-code-block pre.hljs code {
 
 html .docs-prose table {
     overflow: hidden;
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
     border-radius: var(--dracula-radius-sm);
     font-size: var(--dracula-font-size-code);
 }
@@ -625,14 +636,14 @@ html .docs-prose .not-prose:has(> table) > table {
 }
 
 html .docs-prose thead {
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
     background: var(--dracula-bg-secondary);
     color: var(--dracula-display);
 }
 
 html .docs-prose th,
 html .docs-prose td {
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
     padding: 0.55rem 0.75rem;
 }
 
@@ -650,7 +661,7 @@ html .docs-prose .docs-math-block,
 html .docs-prose .beautiful-mermaid,
 html .docs-prose .mermaid,
 .mermaid-zoom-surface {
-    border: 1px solid var(--dracula-bg-tertiary);
+    border: 1px solid var(--dracula-border);
     border-radius: var(--dracula-radius-sm);
     background: var(--dracula-code-bg);
     color: var(--dracula-code-fg);
@@ -681,7 +692,7 @@ html .docs-accordion-content code {
 
 .docs-pin-panel-header,
 .docs-pin-item {
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
 }
 
 .docs-pin-item,
@@ -691,7 +702,7 @@ html .docs-accordion-content code {
 [cmdk-root],
 [role="dialog"],
 [data-radix-popper-content-wrapper] > * {
-    border-color: var(--dracula-bg-tertiary);
+    border-color: var(--dracula-border);
     background: var(--dracula-bg-secondary);
     color: var(--dracula-body);
     border-radius: var(--dracula-radius-sm);
@@ -882,7 +893,7 @@ html body .docs-toaster[data-sonner-toaster][data-sonner-theme] {
     --docs-toast-bg: var(--dracula-bg-secondary);
     --docs-toast-fg: var(--dracula-body);
     --docs-toast-muted-fg: var(--dracula-caption);
-    --docs-toast-border: var(--dracula-bg-tertiary);
+    --docs-toast-border: var(--dracula-border);
     --docs-toast-action-bg: var(--dracula-color);
     --docs-toast-action-fg: var(--dracula-bg-secondary);
     --docs-toast-cancel-bg: var(--dracula-bg-primary);

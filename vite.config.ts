@@ -2,7 +2,7 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import * as readline from "node:readline";
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -13,7 +13,22 @@ import {
   loadSmoothDocsConfig,
   updateSmoothDocsTheme,
 } from "./scripts/config.mjs";
+import {
+  createFlowDevApiHandler,
+  FLOW_DEV_API_REQUEST_LIMIT,
+  type FlowDevApiRequest,
+} from "./scripts/docs-flow/dev-api.mjs";
 import type { AllDocsData } from "./src/types";
+import { getCodexAppResourceDirs, resolveCodexCommand } from "./scripts/codex-command";
+import { createManagedCodexBridge, stopCodexProcess } from "./scripts/codex-process";
+import {
+  CodexMessageStream,
+  extractCodexThreadMessages,
+  normalizeCodexContextUsage,
+  type CodexContextUsage,
+  type CodexChatMessage,
+  type CodexChatMessageUpdate,
+} from "./src/codex-chat";
 
 const docsConfig = loadSmoothDocsConfig({ kitRoot: __dirname });
 const allSites = [docsConfig.siteKey] as const;
@@ -56,7 +71,7 @@ type CodexJsonRpcMessage = {
 
 type CodexChatEvent =
   | { type: "status"; status: CodexChatStatus }
-  | { type: "delta"; text: string }
+  | ({ type: "message" } & CodexChatMessageUpdate)
   | { type: "done"; status: CodexChatStatus }
   | { type: "error"; message: string; status: CodexChatStatus };
 
@@ -67,19 +82,12 @@ type CodexChatStatus = {
   lastError: string;
   selectedEffort: string | null;
   selectedModel: string | null;
-};
-
-type CodexChatRole = "assistant" | "system" | "user";
-
-type CodexChatHistoryMessage = {
-  id: string;
-  role: CodexChatRole;
-  content: string;
+  contextUsage: CodexContextUsage | null;
 };
 
 type CodexSessionResumeResult = {
   status: CodexChatStatus;
-  messages: CodexChatHistoryMessage[];
+  messages: CodexChatMessage[];
 };
 
 type CodexChatMessageRequest = {
@@ -274,6 +282,9 @@ function docsContentPlugin(): Plugin {
 
   return {
     name: "smooth-docs-content",
+    async closeBundle() {
+      await codexChatBridge.dispose();
+    },
     buildStart() {
       generateDocsContent();
     },
@@ -281,6 +292,7 @@ function docsContentPlugin(): Plugin {
       if (isGeneratedFile(context.file)) return [];
     },
     configureServer(server) {
+      server.httpServer?.once("close", () => codexChatBridge.dispose());
       for (const root of watchedRoots) {
         server.watcher.add(root);
       }
@@ -310,6 +322,22 @@ function docsContentPlugin(): Plugin {
 
         folderCache.clear();
       };
+      const flowDevApiHandler = createFlowDevApiHandler({
+        docsRoot,
+        siteKey: docsConfig.siteKey,
+        protocol: "http:",
+        regenerate: generateDocsContentForServer,
+        markSilentDocsFile(file) {
+          silentDocsFiles.add(path.resolve(file));
+        },
+        broadcast(content) {
+          server.ws.send("smooth-docs:content-update", {
+            docsDataBySite: content.docsDataBySite as AllDocsData,
+            generatedAt: content.generatedAt,
+            refreshThemeStylesheet: false,
+          } satisfies DocsContentUpdatePayload);
+        },
+      });
       const regenerate = (file: string) => {
         if (!isDocsFile(file)) return;
         if (silentDocsFiles.delete(path.resolve(file))) return;
@@ -367,6 +395,17 @@ function docsContentPlugin(): Plugin {
       });
 
       server.middlewares.use((req, res, next) => {
+        if (req.url?.startsWith("/__smooth-docs/flow/")) {
+          void handleFlowDevApiRequest(req, res, flowDevApiHandler).catch(() => {
+            sendJson(res, 500, {
+              code: "FLOW_INTERNAL_ERROR",
+              message: "The flow request could not be completed.",
+              diagnostics: [],
+            });
+          });
+          return;
+        }
+
         if (!req.url?.startsWith("/__smooth-docs/")) {
           next();
           return;
@@ -385,6 +424,39 @@ function docsContentPlugin(): Plugin {
       });
     },
   };
+}
+
+async function handleFlowDevApiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  handler: (request: FlowDevApiRequest) => Promise<{ status: number; body: unknown }>,
+) {
+  const body = req.method === "GET" ? undefined : await readBoundedRequestBody(req);
+  const protocol = (req.socket as { encrypted?: boolean }).encrypted ? "https:" : "http:";
+  const response = await handler({
+    method: req.method,
+    url: req.url,
+    protocol,
+    headers: req.headers,
+    body,
+  });
+  sendJson(res, response.status, response.body);
+}
+
+async function readBoundedRequestBody(req: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  let retainedBytes = 0;
+
+  for await (const value of req) {
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    if (retainedBytes > FLOW_DEV_API_REQUEST_LIMIT) continue;
+    const remaining = FLOW_DEV_API_REQUEST_LIMIT + 1 - retainedBytes;
+    const retained = chunk.subarray(0, remaining);
+    chunks.push(retained);
+    retainedBytes += retained.byteLength;
+  }
+
+  return Buffer.concat(chunks, retainedBytes);
 }
 
 async function serveGeneratedPublicFile(req: IncomingMessage, res: ServerResponse) {
@@ -434,6 +506,8 @@ function decodeUrlPathname(pathname: string) {
 }
 
 class CodexChatBridge {
+  private messageStream = new CodexMessageStream();
+  private contextUsageByThread = new Map<string, CodexContextUsage>();
   private activeTurnId: string | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
   private events = new EventEmitter();
@@ -452,13 +526,15 @@ class CodexChatBridge {
   >();
   private startPromise: Promise<void> | null = null;
   private stderrTail = "";
-  private suppressNextCloseError = false;
+  private disposed = false;
+  private shutdown: Promise<void> = Promise.resolve();
   private threadId: string | null = null;
 
   constructor(
     private options: {
       cwd: string;
       serviceName: string;
+      previousShutdown: Promise<void>;
     },
   ) {}
 
@@ -470,12 +546,26 @@ class CodexChatBridge {
       lastError: this.lastError,
       selectedEffort: this.selectedEffort,
       selectedModel: this.selectedModel,
+      contextUsage: this.threadId ? this.contextUsageByThread.get(this.threadId) ?? null : null,
     };
   }
 
   onEvent(listener: (event: CodexChatEvent) => void) {
     this.events.on("event", listener);
     return () => this.events.off("event", listener);
+  }
+
+  dispose() {
+    if (this.disposed) return this.shutdown;
+    this.disposed = true;
+    const child = this.child;
+    this.child = null;
+    this.initialized = false;
+    this.threadId = null;
+    this.activeTurnId = null;
+    this.failAll(new Error("Codex app-server closed"));
+    this.shutdown = Promise.all([this.options.previousShutdown, stopCodexProcess(child)]).then(() => {});
+    return this.shutdown;
   }
 
   async sendMessage(request: CodexChatMessageRequest) {
@@ -496,6 +586,7 @@ class CodexChatBridge {
 
     const params: Record<string, unknown> = {
       threadId: this.threadId,
+      summary: "auto",
       input: [
         {
           type: "text",
@@ -544,12 +635,25 @@ class CodexChatBridge {
   async listModels(): Promise<CodexModelOption[]> {
     await this.ensureInitialized();
 
-    const result = await this.sendRequest("model/list", {
-      includeHidden: false,
-      limit: 100,
-    });
-    const data = Array.isArray(result.data) ? result.data : [];
-    const models = data.map(normalizeCodexModelOption).filter(Boolean) as CodexModelOption[];
+    const catalog = new Map<string, CodexModelOption>();
+    const cursors = new Set<string>();
+    let cursor: string | null = null;
+    do {
+      const result = await this.sendRequest("model/list", {
+        includeHidden: false,
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      });
+      const data = Array.isArray(result.data) ? result.data : [];
+      for (const entry of data) {
+        const model = normalizeCodexModelOption(entry);
+        if (model) catalog.set(model.model, model);
+      }
+      cursor = getString(result.nextCursor);
+      if (cursor && cursors.has(cursor)) throw new Error("Codex returned a repeated model-list cursor");
+      if (cursor) cursors.add(cursor);
+    } while (cursor);
+    const models = [...catalog.values()];
 
     if (!this.selectedModel) {
       const defaultModel = models.find((model) => model.isDefault) ?? models[0];
@@ -645,6 +749,8 @@ class CodexChatBridge {
   }
 
   private async ensureInitialized() {
+    await this.options.previousShutdown;
+    if (this.disposed) throw new Error("Codex connection was restarted. Please try again.");
     if (this.child && this.initialized) return;
 
     if (!this.startPromise) {
@@ -732,36 +838,36 @@ class CodexChatBridge {
 
     this.lastError = "";
     this.stderrTail = "";
-    this.suppressNextCloseError = false;
-    this.child = spawn(command, ["app-server"], {
+    const child = spawn(command, ["app-server"], {
       cwd: this.options.cwd,
       env: getCodexProcessEnv(command),
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.child = child;
 
-    const stdout = readline.createInterface({ input: this.child.stdout });
-    stdout.on("line", (line) => this.handleLine(line));
+    const stdout = readline.createInterface({ input: child.stdout });
+    stdout.on("line", (line) => {
+      if (this.child === child) this.handleLine(line);
+    });
 
-    this.child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (this.child !== child) return;
       this.stderrTail = `${this.stderrTail}${chunk.toString("utf8")}`.slice(-4000);
     });
 
-    this.child.on("error", (error) => {
+    child.on("error", (error) => {
+      if (this.child !== child) return;
       this.child = null;
       this.initialized = false;
       this.threadId = null;
       this.activeTurnId = null;
-      this.suppressNextCloseError = true;
       this.failAll(error);
       this.lastError = error.message;
       this.broadcast({ type: "error", message: error.message, status: this.getStatus() });
     });
 
-    this.child.on("close", (code, signal) => {
-      if (this.suppressNextCloseError) {
-        this.suppressNextCloseError = false;
-        return;
-      }
+    child.on("close", (code, signal) => {
+      if (this.child !== child) return;
 
       const detail = this.stderrTail.trim();
       const message = detail
@@ -811,22 +917,35 @@ class CodexChatBridge {
   }
 
   private handleNotification(method: string, params: Record<string, unknown>) {
+    if (method === "thread/tokenUsage/updated") {
+      const threadId = getString(params.threadId);
+      const usage = normalizeCodexContextUsage(params.tokenUsage);
+      if (threadId) {
+        if (usage) this.contextUsageByThread.set(threadId, usage);
+        else this.contextUsageByThread.delete(threadId);
+        if (threadId === this.threadId) this.broadcast({ type: "status", status: this.getStatus() });
+      }
+      return;
+    }
+
+    if (typeof params.threadId === "string" && this.threadId && params.threadId !== this.threadId) return;
+
     if (method === "turn/started") {
+      this.messageStream.reset();
       const turn = getObject(params.turn);
       this.activeTurnId = getString(turn?.id) ?? this.activeTurnId;
       this.broadcast({ type: "status", status: this.getStatus() });
       return;
     }
 
-    if (method === "item/agentMessage/delta") {
-      const text = extractCodexDelta(params);
-      if (text) {
-        this.broadcast({ type: "delta", text });
-      }
+    const update = this.messageStream.handle(method, params);
+    if (update) {
+      this.broadcast({ type: "message", ...update });
       return;
     }
 
     if (method === "turn/completed") {
+      this.messageStream.reset();
       this.activeTurnId = null;
       this.broadcast({ type: "done", status: this.getStatus() });
       return;
@@ -882,37 +1001,9 @@ class CodexChatBridge {
   }
 }
 
-const codexChatBridge = new CodexChatBridge({
-  cwd: docsConfig.projectDir,
-  serviceName: "smooth_docs_kit",
-});
-
-function resolveCodexCommand() {
-  const configured = process.env.SMOOTH_DOCS_CODEX_BIN || process.env.CODEX_BIN || "";
-  const executableName = process.platform === "win32" ? "codex.cmd" : "codex";
-  const appResourceDirs = getCodexAppResourceDirs();
-  const pathCandidates = (process.env.PATH ?? "")
-    .split(path.delimiter)
-    .filter(Boolean)
-    .map((dir) => path.join(dir, executableName));
-  const homeCandidates = process.env.HOME
-    ? [
-        path.join(process.env.HOME, ".local", "bin", executableName),
-        path.join(process.env.HOME, ".codex", "bin", executableName),
-        path.join(process.env.HOME, ".codex", "plugins", ".plugin-appserver", executableName),
-      ]
-    : [];
-  const candidates = [
-    configured,
-    ...pathCandidates,
-    ...appResourceDirs.map((dir) => path.join(dir, executableName)),
-    "/opt/homebrew/bin/codex",
-    "/usr/local/bin/codex",
-    ...homeCandidates,
-  ].filter(Boolean);
-
-  return candidates.find((candidate) => existsSync(candidate)) ?? null;
-}
+const codexChatBridge = createManagedCodexBridge(docsConfig.projectDir, (previousShutdown) =>
+  new CodexChatBridge({ cwd: docsConfig.projectDir, serviceName: "smooth_docs_kit", previousShutdown }),
+);
 
 function getCodexProcessEnv(command: string) {
   const commandDir = path.dirname(command);
@@ -927,23 +1018,6 @@ function getCodexProcessEnv(command: string) {
     ...process.env,
     PATH: [...extraPathEntries, process.env.PATH].filter(Boolean).join(path.delimiter),
   };
-}
-
-function getCodexAppResourceDirs() {
-  if (process.platform !== "darwin") return [];
-
-  const homeApplications = process.env.HOME
-    ? [
-        path.join(process.env.HOME, "Applications", "ChatGPT.app", "Contents", "Resources"),
-        path.join(process.env.HOME, "Applications", "Codex.app", "Contents", "Resources"),
-      ]
-    : [];
-
-  return [
-    "/Applications/ChatGPT.app/Contents/Resources",
-    "/Applications/Codex.app/Contents/Resources",
-    ...homeApplications,
-  ];
 }
 
 function buildCodexChatPrompt(request: CodexChatMessageRequest) {
@@ -987,115 +1061,6 @@ function buildCodexChatPrompt(request: CodexChatMessageRequest) {
 function trimCodexContext(value: string, maxLength: number) {
   if (value.length <= maxLength) return value;
   return `${value.slice(0, maxLength)}\n[truncated]`;
-}
-
-function extractCodexDelta(params: Record<string, unknown>) {
-  const delta = params.delta;
-  if (typeof delta === "string") return delta;
-  if (typeof params.text === "string") return params.text;
-  if (typeof params.message === "string") return params.message;
-
-  const deltaObject = getObject(delta);
-  if (typeof deltaObject?.text === "string") return deltaObject.text;
-  if (typeof deltaObject?.content === "string") return deltaObject.content;
-
-  return "";
-}
-
-function extractCodexThreadMessages(
-  thread: Record<string, unknown> | null,
-  threadId: string,
-): CodexChatHistoryMessage[] {
-  const turns = Array.isArray(thread?.turns) ? thread.turns : [];
-  const messages: CodexChatHistoryMessage[] = [];
-
-  for (const turnValue of turns) {
-    const turn = getObject(turnValue);
-    if (!turn) continue;
-
-    const turnId = getString(turn.id) ?? `turn-${messages.length}`;
-    const items = Array.isArray(turn.items) ? turn.items : [];
-
-    for (const itemValue of items) {
-      const message = normalizeCodexThreadItem(itemValue);
-      if (!message?.content.trim()) continue;
-      messages.push({
-        id: message.id ?? `${threadId}:${turnId}:${messages.length}`,
-        role: message.role,
-        content: message.content.trim(),
-      });
-    }
-
-    const error = getObject(turn.error);
-    const errorMessage = getString(error?.message);
-    if (errorMessage) {
-      messages.push({
-        id: `${threadId}:${turnId}:error`,
-        role: "system",
-        content: errorMessage,
-      });
-    }
-  }
-
-  return messages;
-}
-
-function normalizeCodexThreadItem(value: unknown): {
-  id: string | null;
-  role: CodexChatRole;
-  content: string;
-} | null {
-  const item = getObject(value);
-  if (!item) return null;
-
-  const type = getString(item.type);
-  const id = getString(item.id);
-
-  if (type === "userMessage") {
-    const content = Array.isArray(item.content)
-      ? item.content.map(extractCodexUserInputText).filter(Boolean).join("\n\n")
-      : "";
-    return {
-      id,
-      role: "user",
-      content: extractOriginalCodexUserRequest(content),
-    };
-  }
-
-  if (type === "agentMessage") {
-    return {
-      id,
-      role: "assistant",
-      content: getString(item.text) ?? "",
-    };
-  }
-
-  return null;
-}
-
-function extractCodexUserInputText(value: unknown) {
-  const input = getObject(value);
-  if (!input) return "";
-
-  const type = getString(input.type);
-  if (type === "text") return getString(input.text) ?? "";
-
-  if (type === "image") {
-    const url = getString(input.url);
-    return url ? `![image](${url})` : "";
-  }
-
-  if (type === "localImage") {
-    const imagePath = getString(input.path);
-    return imagePath ? `![image](${imagePath})` : "";
-  }
-
-  if (type === "mention" || type === "skill") {
-    const name = getString(input.name);
-    return name ? `@${name}` : "";
-  }
-
-  return "";
 }
 
 function extractOriginalCodexUserRequest(value: string) {

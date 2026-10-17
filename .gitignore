@@ -1,6 +1,13 @@
 node_modules/
 dist/
+build/
 .generated/
 .DS_Store
 site/
 examples/*/site/
+*.log
+.env*
+*.tmp
+*.swp
+.vscode/
+.idea/

@@ -93,6 +93,23 @@ $$
 \int_0^1 x^2\,dx = \frac{1}{3}
 $$
 
+## Lua
+
+Use `lua` after the opening code fence to enable Lua syntax highlighting.
+The `luau` language tag also uses Lua syntax highlighting.
+
+```lua
+-- Greet each reader
+local function greet(name)
+  return "Hello, " .. name
+end
+
+local readers = { "Smooth", "Lua" }
+for _, name in ipairs(readers) do
+  print(greet(name))
+end
+```
+
 ## Mermaid
 
 ```mermaid
@@ -100,6 +117,31 @@ flowchart LR
   A[Markdown] --> B[Generate content]
   B --> C[Linear theme CSS]
   C --> D[Preview]
+```
+
+Mermaid configuration directives are accepted, but diagrams use the site's
+colors instead of the directive's theme settings.
+
+```mermaid
+%%{init: {
+    "theme": "base",
+    "themeVariables": {
+        "primaryColor": "#111720",
+        "primaryTextColor": "#fff",
+        "primaryBorderColor": "#111720",
+        "lineColor": "#79B8FF",
+        "tertiaryColor": "#0d131b",
+        "tertiaryBorderColor": "#202530"
+    }
+}}%%
+
+graph LR
+
+subgraph root
+    text --> effect
+end
+
+count --> text
 ```
 
 ## Accordion

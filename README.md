@@ -186,3 +186,80 @@ Relative links to `.md` files are converted to docs routes:
 ```
 
 Supported features include GitHub-style Markdown, Mermaid, syntax highlighting, tables, raw HTML, and accordion blocks.
+
+## Interactive workflows (`smooth-flow`)
+
+Use a `smooth-flow` fence when a diagram needs richer exploration and visual editing than Mermaid.
+The authored YAML remains the source of truth; the build validates it, computes deterministic
+coordinates, and lazy-loads the React Flow viewer only on pages that contain a workflow.
+
+```yaml
+version: 1
+id: checkout
+kind: workflow
+title: Checkout
+direction: right
+lanes:
+  - id: customer
+    label: Customer
+  - id: api
+    label: API
+nodes:
+  - id: submit
+    type: action
+    label: Submit order
+    lane: customer
+  - id: validate
+    type: decision
+    label: Is the order valid?
+    lane: api
+edges:
+  - id: submit-validate
+    from: submit
+    to: validate
+    label: Request
+stories:
+  - id: happy-path
+    label: Happy path
+    steps:
+      - node: submit
+      - edge: submit-validate
+      - node: validate
+```
+
+Place that YAML inside a fenced block whose info string is `smooth-flow`. Supported node types are
+`action`, `decision`, `service`, `external`, and `note`; edge styles are `normal`, `error`, and
+`async`. Lanes, node metadata and links, authored positions, and named story steps are optional.
+IDs must be stable lowercase kebab-case values because references and visual edits use them for
+round trips.
+
+For a reusable definition, put the full document in a `.docs-flow.yml` file under the published
+docs root and reference it relative to the Markdown page:
+
+```yaml
+src: ./flows/checkout.docs-flow.yml
+view: happy-path
+height: 560
+```
+
+One external definition can be embedded by multiple pages with different `view` and `height`
+options. Source paths that escape the allowed docs root, use another extension, resolve through an
+unsafe symlink, or exceed the configured size limits are rejected. Flow source files are not copied
+to public assets.
+
+While using `smdocs run`, choose **Edit flow** to change nodes, connections, lanes, properties,
+positions, and stories. Undo, redo, discard, validation, conflict recovery, and explicit save are
+available. Inline saves replace only the selected fence body; external saves replace only the
+derived `.docs-flow.yml` target. The server reparses the owning Markdown and checks a source
+revision before every atomic write, so a client-supplied path or stale editor cannot silently
+overwrite another source. Editing is intentionally unavailable in `smdocs build` output.
+
+Readers can pan, zoom, search, inspect relationships, focus upstream/downstream paths, play named
+stories, switch to a keyboard-friendly text view, and export the complete graph as PNG. PNG export
+fits authored graph bounds rather than the current viewport and excludes controls, selections, and
+editor UI.
+
+The viewer uses `@xyflow/react` (MIT), deterministic layout uses `elkjs` (EPL-2.0), and PNG capture
+uses `html-to-image` (MIT). `elkjs` is shipped as an unmodified dependency; distributors should
+retain its EPL-2.0 license and notices when redistributing the kit. Layout runs during content
+generation so reader output is stable and does not visibly rearrange on page load.

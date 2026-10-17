@@ -3,11 +3,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import fg from "fast-glob";
 import matter from "gray-matter";
-import { renderMermaidSVG } from "beautiful-mermaid";
+import { renderMermaidSVG, THEMES } from "beautiful-mermaid";
 import hljs from "highlight.js";
 import katex from "katex";
 import MarkdownIt from "markdown-it";
 import { loadSmoothDocsConfig } from "./config.mjs";
+import {
+  compileFlowLayout,
+  createExternalFlowRevision,
+  createInlineFlowRevision,
+  parseFlowYaml,
+  parseFlowMarkdown,
+  readFileBounded,
+  resolveExternalFlowPath,
+  validateFlowDocument,
+} from "./docs-flow/index.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -28,7 +38,16 @@ const siteTitle = config.siteName;
 const navIgnorePatterns = expandDirectoryIgnorePatterns(config.navIgnore);
 const AUTONUMBER_PREFIX = "__beautiful_mermaid_autonumber_";
 const AUTONUMBER_PATTERN = /__beautiful_mermaid_autonumber_(\d+)__\s*/g;
+const MERMAID_THEME_NAME = "github";
+// Keep both palettes on the wrapper and SVG so the page and expanded view
+// can follow the site's color mode without regenerating the diagram.
+const MERMAID_PALETTE_STYLES = ["light", "dark"]
+  .flatMap((mode) => ["bg", "fg", "line", "accent"].map(
+    (color) => `--docs-mermaid-${mode}-${color}:${THEMES[`github-${mode}`][color]}`,
+  ))
+  .join(";");
 const TASK_LIST_MARKER = /^\s*\[([ xX])\]\s+/;
+const DEFAULT_FLOW_HEIGHT = 560;
 
 await fs.mkdir(sourceDir, { recursive: true });
 await fs.rm(generatedDir, { recursive: true, force: true });
@@ -56,7 +75,7 @@ const assetFiles = await fg("**/*", {
   cwd: sourceDir,
   dot: false,
   onlyFiles: true,
-  ignore: ["**/*.md"],
+  ignore: ["**/*.md", "**/*.docs-flow.yml"],
 });
 const assetDimensions = await collectAssetDimensions(assetFiles);
 
@@ -80,16 +99,30 @@ for (const relativePath of markdownFiles.sort()) {
   const titleHeading = extractTitleHeading(parsed.content);
   const title = titleHeading?.title || parsed.data.title || titleFromPath(relativePath);
   const markdown = (titleHeading?.markdownWithoutHeading ?? parsed.content).trim();
-  const html = renderMarkdown(markdown, { pageDir });
+  const sourcePath = `${site}/docs/${relativePath}`;
+  const compiledFlows = await compilePageFlows(raw, {
+    pageAbsolutePath: absolutePath,
+    pageDir,
+    pageSourcePath: sourcePath,
+  });
+  const html = renderMarkdown(markdown, {
+    pageDir,
+    flowEmbedIds: compiledFlows.embedIds,
+  });
+  const text = joinSearchText(
+    plainText(stripSmoothFlowFences(markdown)),
+    compiledFlows.searchText,
+  );
 
   pages.push({
     title,
     url: route,
-    sourcePath: `${site}/docs/${relativePath}`,
+    sourcePath,
     absolutePath: toPublicAbsolutePath(absolutePath),
-    markdown: raw,
+    markdown: includeLocalPaths ? raw : redactSmoothFlowSources(raw),
     html,
-    text: plainText(markdown),
+    text,
+    ...(compiledFlows.embedIds.length > 0 ? { flows: compiledFlows.flows } : {}),
     createdAt: toFileDate(stats.birthtimeMs || stats.ctimeMs || stats.mtimeMs),
     updatedAt: toFileDate(stats.mtimeMs),
     kind: "page",
@@ -316,6 +349,10 @@ function renderMarkdown(markdown, env) {
     if (lang === "mermaid") {
       return `${renderMermaidBlock(token.content)}\n`;
     }
+    if (lang === "smooth-flow") {
+      const embedId = rendererEnv.flowEmbedIds?.shift();
+      if (embedId) return `${renderFlowMarker(embedId)}\n`;
+    }
     return `${renderHighlightedCodeBlock(token.content, token.info)}\n`;
   };
 
@@ -380,11 +417,393 @@ function renderMarkdown(markdown, env) {
   md.renderer.rules.td_open = () =>
     '<td class="p-4 align-middle text-foreground [&:has([role=checkbox])]:pr-0">';
 
-  const withAccordions = expandAccordions(markdown, (innerMarkdown) =>
+  const withFlowMarkers = replaceSmoothFlowFences(markdown, env.flowEmbedIds ?? []);
+  const withAccordions = expandAccordions(withFlowMarkers, (innerMarkdown) =>
     md.render(innerMarkdown, { ...env, slugCounts: new Map() }),
   );
 
   return md.render(withAccordions, { ...env, slugCounts: new Map() });
+}
+
+async function compilePageFlows(markdown, { pageAbsolutePath, pageDir, pageSourcePath }) {
+  const parsed = parseFlowMarkdown(markdown);
+  const flows = {};
+  const embedIds = [];
+  const searchParts = [];
+  const flowIdCounts = new Map();
+
+  for (const embed of parsed.embeds) {
+    const flowId = embed.document?.id;
+    if (flowId) flowIdCounts.set(flowId, (flowIdCounts.get(flowId) ?? 0) + 1);
+  }
+
+  for (const [index, embed] of parsed.embeds.entries()) {
+    const embedId = `flow-${index + 1}`;
+    embedIds.push(embedId);
+
+    if (embed.kind === "reference" && embed.reference) {
+      const external = await compileExternalFlowEmbed(embed, {
+        embedId,
+        pageAbsolutePath,
+        pageDir,
+        pageSourcePath,
+      });
+      flows[embedId] = external.flow;
+      if (external.searchText) searchParts.push(external.searchText);
+      continue;
+    }
+
+    if (embed.kind === "document" && embed.document) {
+      const validation = validateFlowDocument(embed.document);
+      const duplicateId = (flowIdCounts.get(embed.document.id) ?? 0) > 1;
+      const diagnostics = [...embed.diagnostics, ...validation.diagnostics];
+      if (duplicateId && !diagnostics.some((item) => item.code === "FLOW_ID_AMBIGUOUS")) {
+        diagnostics.push({
+          code: "FLOW_ID_AMBIGUOUS",
+          severity: "error",
+          message: `Flow ID ${embed.document.id} is duplicated in this Markdown file.`,
+          path: "id",
+          line: embed.startLine,
+          column: 1,
+          subjectId: embed.document.id,
+        });
+      }
+
+      if (validation.ok) {
+        const searchText = flowSearchText(embed.document);
+        const document = projectFlowDocument(embed.document, pageDir);
+        const source = includeLocalPaths
+          ? {
+              kind: "inline",
+              pageSourcePath,
+              flowId: embed.document.id,
+              revision: createInlineFlowRevision({
+                pageSourcePath,
+                flowId: embed.document.id,
+                body: embed.sourceText,
+              }),
+              editable: embed.editable && !duplicateId,
+            }
+          : undefined;
+
+        try {
+          const layout = await compileFlowLayout(embed.document);
+          flows[embedId] = {
+            embedId,
+            document,
+            view: { height: DEFAULT_FLOW_HEIGHT },
+            layout,
+            diagnostics,
+            searchText,
+            ...(source ? { source } : {}),
+          };
+          searchParts.push(searchText);
+          continue;
+        } catch (error) {
+          console.warn(
+            `Flow layout failed for ${pageSourcePath}#${embed.document.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          diagnostics.push({
+            code: "FLOW_LAYOUT_FAILED",
+            severity: "error",
+            message: "The flow layout could not be generated.",
+            subjectId: embed.document.id,
+          });
+          flows[embedId] = {
+            embedId,
+            document,
+            view: { height: DEFAULT_FLOW_HEIGHT },
+            diagnostics,
+            fallbackText: safeFlowFallback(embed),
+            searchText,
+            ...(source ? { source: { ...source, editable: false } } : {}),
+          };
+          searchParts.push(searchText);
+          continue;
+        }
+      }
+    }
+
+    const diagnostics = [...embed.diagnostics];
+    if (embed.kind === "reference" && diagnostics.length === 0) {
+      diagnostics.push({
+        code: "EXTERNAL_FLOW_DEFERRED",
+        severity: "error",
+        message: "External flow references are not available yet.",
+        path: "src",
+        line: embed.startLine + 1,
+        column: 1,
+      });
+    }
+    if (diagnostics.length === 0) {
+      diagnostics.push({
+        code: "FLOW_COMPILE_FAILED",
+        severity: "error",
+        message: "The flow source could not be compiled.",
+        line: embed.startLine,
+        column: 1,
+      });
+    }
+
+    flows[embedId] = {
+      embedId,
+      view: { height: embed.reference?.height ?? DEFAULT_FLOW_HEIGHT },
+      diagnostics,
+      fallbackText: safeFlowFallback(embed),
+      searchText: "",
+    };
+  }
+
+  return {
+    flows,
+    embedIds,
+    searchText: joinSearchText(...searchParts),
+  };
+}
+
+async function compileExternalFlowEmbed(
+  embed,
+  { embedId, pageAbsolutePath, pageDir, pageSourcePath },
+) {
+  const reference = embed.reference;
+  const fallback = (diagnostics, fallbackText = embed.sourceText) => ({
+    flow: {
+      embedId,
+      view: {
+        ...(reference.view ? { story: reference.view } : {}),
+        height: reference.height ?? DEFAULT_FLOW_HEIGHT,
+      },
+      diagnostics,
+      fallbackText: includeLocalPaths ? fallbackText : "This flow could not be compiled.",
+      searchText: "",
+    },
+    searchText: "",
+  });
+
+  let externalPath;
+  try {
+    externalPath = await resolveExternalFlowPath({
+      docsRoot: sourceDir,
+      publishRoot: sourceDir,
+      pagePath: pageAbsolutePath,
+      src: reference.src,
+    });
+  } catch (error) {
+    const missing = error?.code === "FLOW_SOURCE_NOT_FOUND";
+    return fallback([
+      {
+        code: missing ? "EXTERNAL_FLOW_NOT_FOUND" : error?.code ?? "EXTERNAL_FLOW_INVALID",
+        severity: "error",
+        message: missing
+          ? `External flow ${reference.src} was not found.`
+          : `External flow ${reference.src} is outside the allowed documentation root or is unsafe.`,
+        path: "src",
+        line: embed.startLine + 1,
+        column: 1,
+      },
+    ]);
+  }
+
+  let externalSource;
+  try {
+    externalSource = await readFileBounded(externalPath, {
+      encoding: "utf8",
+      maxBytes: 512 * 1024,
+    });
+  } catch (error) {
+    return fallback([
+      {
+        code: error?.code ?? "EXTERNAL_FLOW_NOT_FOUND",
+        severity: "error",
+        message: `External flow ${reference.src} could not be read.`,
+        path: "src",
+        line: embed.startLine + 1,
+        column: 1,
+      },
+    ]);
+  }
+
+  const parsed = parseFlowYaml(externalSource, { allowReference: false });
+  if (!parsed.ok || parsed.kind !== "document" || !parsed.document) {
+    return fallback(parsed.diagnostics, externalSource);
+  }
+
+  if (
+    reference.view &&
+    !(parsed.document.stories ?? []).some((story) => story.id === reference.view)
+  ) {
+    return fallback([
+      {
+        code: "FLOW_VIEW_NOT_FOUND",
+        severity: "error",
+        message: `Story ${reference.view} does not exist in external flow ${parsed.document.id}.`,
+        path: "view",
+        line: embed.startLine + 2,
+        column: 1,
+        subjectId: reference.view,
+      },
+    ]);
+  }
+
+  const searchText = flowSearchText(parsed.document);
+  const logicalExternalPath = path.resolve(
+    path.dirname(pageAbsolutePath),
+    ...reference.src.split("/"),
+  );
+  const externalRelativePath = path
+    .relative(sourceDir, logicalExternalPath)
+    .split(path.sep)
+    .join("/");
+  const externalPageDir = path.posix.dirname(externalRelativePath);
+  const document = projectFlowDocument(
+    parsed.document,
+    externalPageDir === "." ? pageDir : externalPageDir,
+  );
+
+  try {
+    const layout = await compileFlowLayout(parsed.document);
+    return {
+      flow: {
+        embedId,
+        document,
+        view: {
+          ...(reference.view ? { story: reference.view } : {}),
+          height: reference.height ?? DEFAULT_FLOW_HEIGHT,
+        },
+        layout,
+        diagnostics: [],
+        searchText,
+        ...(includeLocalPaths
+          ? {
+              source: {
+                kind: "external",
+                pageSourcePath,
+                flowId: parsed.document.id,
+                reference: reference.src,
+                revision: createExternalFlowRevision({
+                  pageSourcePath,
+                  flowId: parsed.document.id,
+                  referenceBody: embed.sourceText,
+                  externalLocator: externalRelativePath,
+                  body: externalSource,
+                }),
+                editable: true,
+              },
+            }
+          : {}),
+      },
+      searchText,
+    };
+  } catch (error) {
+    return fallback([
+      {
+        code: "FLOW_LAYOUT_FAILED",
+        severity: "error",
+        message: error instanceof Error ? error.message : "The external flow layout failed.",
+        path: "src",
+      },
+    ]);
+  }
+}
+
+function projectFlowDocument(document, pageDir) {
+  return {
+    ...document,
+    nodes: document.nodes.map((node) => {
+      if (!node.links) return node;
+      return {
+        ...node,
+        links: node.links.flatMap((link) => {
+          if (link.kind === "docs") {
+            return [{ ...link, href: rewriteMarkdownLink(link.href, pageDir) }];
+          }
+          if (link.kind === "source" && !includeLocalPaths && !isPublicHttpUrl(link.href)) {
+            return [];
+          }
+          return [link];
+        }),
+      };
+    }),
+  };
+}
+
+function isPublicHttpUrl(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function flowSearchText(document) {
+  const values = [document.title, document.description];
+  for (const lane of document.lanes ?? []) values.push(lane.label, lane.description);
+  for (const node of document.nodes) {
+    values.push(node.label, node.description, node.owner, node.status, node.risk);
+  }
+  for (const edge of document.edges) values.push(edge.label);
+  for (const story of document.stories ?? []) values.push(story.label, story.description);
+  return joinSearchText(...values);
+}
+
+function joinSearchText(...values) {
+  return values
+    .filter((value) => typeof value === "string" && value.trim())
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function safeFlowFallback(embed) {
+  return includeLocalPaths ? embed.sourceText : "This flow could not be compiled.";
+}
+
+function replaceSmoothFlowFences(markdown, embedIds) {
+  const parsed = parseFlowMarkdown(markdown);
+  if (parsed.embeds.length !== embedIds.length) {
+    console.warn(
+      `Flow marker count changed during Markdown rendering: expected ${embedIds.length}, found ${parsed.embeds.length}.`,
+    );
+  }
+  return replaceParsedFlowFences(markdown, parsed.embeds, (_, index) => {
+    const embedId = embedIds[index];
+    return embedId ? renderFlowMarker(embedId) : null;
+  });
+}
+
+function stripSmoothFlowFences(markdown) {
+  const parsed = parseFlowMarkdown(markdown);
+  return replaceParsedFlowFences(markdown, parsed.embeds, () => " ");
+}
+
+function redactSmoothFlowSources(markdown) {
+  const parsed = parseFlowMarkdown(markdown);
+  return replaceParsedFlowFences(
+    markdown,
+    parsed.embeds,
+    () => "<!-- smooth-flow source omitted from static output -->",
+  );
+}
+
+function replaceParsedFlowFences(markdown, embeds, replacementFor) {
+  let output = markdown;
+  for (let index = embeds.length - 1; index >= 0; index -= 1) {
+    const embed = embeds[index];
+    const replacement = replacementFor(embed, index);
+    if (replacement === null) continue;
+    output = `${output.slice(0, embed.startOffset)}${replacement}${output.slice(embed.endOffset)}`;
+  }
+  return output;
+}
+
+function renderFlowMarker(embedId) {
+  const escapedId = escapeAttribute(embedId);
+  // A block-level HTML marker must be followed by a blank line so markdown-it
+  // does not absorb the next heading or paragraph into the HTML block.
+  return `<div data-docs-flow="${escapedId}" data-smooth-flow-id="${escapedId}"></div>\n`;
 }
 
 function renderMermaidBlock(source) {
@@ -394,20 +813,22 @@ function renderMermaidBlock(source) {
     const svg = enhanceAutonumberBadges(
       normalizeMermaidSvg(
         renderMermaidSVG(prepareMermaidSource(cleanSource), {
-          bg: "hsl(var(--background))",
-          fg: "hsl(var(--foreground))",
-          line: "hsl(var(--border))",
-          accent: "hsl(var(--foreground))",
-          muted: "hsl(var(--foreground))",
-          surface: "hsl(var(--card))",
-          border: "hsl(var(--border))",
-          transparent: true,
+          bg: "var(--docs-mermaid-bg)",
+          fg: "var(--docs-mermaid-fg)",
+          line: "var(--docs-mermaid-line)",
+          accent: "var(--docs-mermaid-accent)",
+          // Set every optional color explicitly: the site's --border token
+          // contains HSL channels, which is not a valid SVG stroke by itself.
+          border: "var(--docs-mermaid-line)",
+          surface: "color-mix(in srgb, var(--docs-mermaid-fg) 3%, var(--docs-mermaid-bg))",
+          muted: "var(--docs-mermaid-fg)",
+          transparent: false,
           padding: 32,
         }),
       ),
     );
 
-    return `<div class="beautiful-mermaid beautiful-mermaid--rendered" data-mermaid-source="${escapeHtml(cleanSource)}">${svg}</div>`;
+    return `<div class="beautiful-mermaid beautiful-mermaid--rendered" data-mermaid-theme="${MERMAID_THEME_NAME}" style="${MERMAID_PALETTE_STYLES};background-color:var(--docs-mermaid-bg);border-color:var(--docs-mermaid-line)" data-mermaid-source="${escapeHtml(cleanSource)}">${svg}</div>`;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`Mermaid diagram render failed: ${message}`);
@@ -417,6 +838,8 @@ function renderMermaidBlock(source) {
 
 function normalizeMermaidSvg(svg) {
   return svg
+    .replace("<svg ", `<svg data-mermaid-theme="${MERMAID_THEME_NAME}" `)
+    .replace(/(<svg\b[^>]*\bstyle=")/, `$1${MERMAID_PALETTE_STYLES};--beautiful-mermaid-autonumber-bg:var(--bg);--beautiful-mermaid-autonumber-border:var(--accent);--beautiful-mermaid-autonumber-text:var(--fg);`)
     .replace(/\s*@import url\('[^']+'\);\n?/g, "\n")
     .replace(
       /text \{ font-family: [^}]+ \}/,
@@ -425,11 +848,20 @@ function normalizeMermaidSvg(svg) {
 }
 
 function prepareMermaidSource(source) {
-  return applyAutonumber(normalizeFlowchartSubgraphs(source));
+  // beautiful-mermaid skips single-line comments, but does not parse Mermaid
+  // configuration directives. Remove their entire body, including multiline
+  // settings, and keep using the renderer's site-theme options.
+  const diagramSource = source.replace(/^[\t ]*%%\{[\s\S]*?\}%%/gm, "");
+  return applyAutonumber(normalizeFlowchartSubgraphs(diagramSource));
 }
 
 function normalizeFlowchartSubgraphs(source) {
   const lines = source.split("\n");
+  const headerIndex = lines.findIndex((line) => line.trim() && !line.trim().startsWith("%%"));
+  // beautiful-mermaid requires an explicit direction, even for a bare header.
+  if (headerIndex >= 0 && /^(graph|flowchart)$/i.test(lines[headerIndex].trim())) {
+    lines[headerIndex] = `${lines[headerIndex].trim()} TD`;
+  }
   const isFlowchart = lines.some((line) => /^(graph|flowchart)\s+/i.test(line.trim()));
   if (!isFlowchart) return source;
 
@@ -801,6 +1233,7 @@ function normalizeHighlightLanguage(value) {
   const aliases = {
     js: "javascript",
     jsx: "javascript",
+    luau: "lua",
     py: "python",
     rb: "ruby",
     sh: "bash",
