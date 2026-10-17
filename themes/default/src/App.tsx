@@ -14,6 +14,7 @@ import {
     FileText,
     Folder,
     FolderPlus,
+    History,
     Inbox,
     Layout,
     Loader2,
@@ -103,6 +104,7 @@ import { cn } from "@/lib/utils";
 import { resolveDocsNavigation } from "@/lib/docs-navigation";
 import { makeMermaidSvgPortable } from "@/lib/mermaid-svg";
 import { CodexChatMessages } from "@/components/CodexChatMessages";
+import { CodexSessionsPanel } from "@/components/CodexSessionsPanel";
 import { CodexContextUsageIndicator } from "@/components/CodexContextUsage";
 import { upsertCodexChatMessage, type CodexChatMessage, type CodexChatMessageUpdate, type CodexContextUsage } from "../../../src/codex-chat";
 import "katex/dist/katex.min.css";
@@ -3334,11 +3336,29 @@ function CodexChatWidget({
         contextUsage: null,
     });
     const assistantMessageIdRef = React.useRef<string | null>(null);
+    const sessionsTriggerRef = React.useRef<HTMLButtonElement>(null);
+    const statusRef = React.useRef(status);
     const previousSessionRef = React.useRef(readStorageValue(CODEX_CHAT_SESSION_KEY));
     const restoreStartedRef = React.useRef(false);
     const draftRef = React.useRef<HTMLTextAreaElement>(null);
     const launcherRef = React.useRef<HTMLButtonElement>(null);
     const endRef = React.useRef<HTMLDivElement>(null);
+
+    React.useLayoutEffect(() => { statusRef.current = status; }, [status]);
+
+    const forgetSession = React.useCallback((threadId: string) => {
+        setSessions((current) => current.filter((session) => session.id !== threadId));
+        if (previousSessionRef.current === threadId) {
+            previousSessionRef.current = null;
+            writeStorageValue(CODEX_CHAT_SESSION_KEY, "");
+        }
+        if (statusRef.current.threadId === threadId) {
+            setMessages([]);
+            assistantMessageIdRef.current = null;
+            restoreStartedRef.current = true;
+            setSessionReady(true);
+        }
+    }, []);
 
     const appendMessage = React.useCallback((message: CodexChatMessage) => {
         setMessages((current) => [...current, message]);
@@ -3387,6 +3407,20 @@ function CodexChatWidget({
             assistantMessageIdRef.current = null;
         };
 
+        const onSessionDeleted = (event: MessageEvent<string>) => {
+            const data = readData<{ threadId: string; status: CodexChatStatus }>(event);
+            if (!data?.threadId) return;
+            forgetSession(data.threadId);
+            if (data.status) setStatus(data.status);
+        };
+
+        const onSessionRenamed = (event: MessageEvent<string>) => {
+            const data = readData<{ threadId: string; name: string }>(event);
+            if (data?.threadId && data.name) {
+                setSessions((current) => current.map((session) => session.id === data.threadId ? { ...session, name: data.name } : session));
+            }
+        };
+
         const onCodexError = (event: MessageEvent<string>) => {
             const data = readData<{ message?: string; status?: CodexChatStatus }>(event);
             const message = data?.message || "Codex chat failed";
@@ -3402,6 +3436,8 @@ function CodexChatWidget({
         source.addEventListener("status", onStatus);
         source.addEventListener("message", onMessage);
         source.addEventListener("done", onDone);
+        source.addEventListener("sessionDeleted", onSessionDeleted);
+        source.addEventListener("sessionRenamed", onSessionRenamed);
         source.addEventListener("error", onCodexError);
         source.onerror = () => {
             setStatus((current) => ({
@@ -3416,10 +3452,16 @@ function CodexChatWidget({
             source.removeEventListener("status", onStatus);
             source.removeEventListener("message", onMessage);
             source.removeEventListener("done", onDone);
+            source.removeEventListener("sessionDeleted", onSessionDeleted);
+            source.removeEventListener("sessionRenamed", onSessionRenamed);
             source.removeEventListener("error", onCodexError);
             source.close();
         };
-    }, [updateAssistantMessage, appendMessage]);
+    }, [updateAssistantMessage, appendMessage, forgetSession]);
+
+    React.useEffect(() => {
+        if (!open) setSessionsOpen(false);
+    }, [open]);
 
     React.useEffect(() => {
         if (!open) return;
@@ -3608,6 +3650,27 @@ function CodexChatWidget({
         },
         [appendMessage, status.running],
     );
+
+    const deleteSession = React.useCallback(async (threadId: string) => {
+        if (status.running || sessionLoading) throw new Error("Wait for the current operation to finish");
+        setSessionLoading(true);
+        try {
+            const response = await fetch("/__smooth-docs/codex/session", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ threadId }),
+            });
+            const data = await response.json().catch(() => ({})) as {
+                error?: string;
+                status?: CodexChatStatus;
+            };
+            if (!response.ok) throw new Error(data.error ?? "Failed to delete session");
+            forgetSession(threadId);
+            if (data.status) setStatus(data.status);
+        } finally {
+            setSessionLoading(false);
+        }
+    }, [forgetSession, sessionLoading, status.running]);
 
     React.useEffect(() => {
         if (!open || !statusLoaded || status.running || restoreStartedRef.current) return;
@@ -3826,6 +3889,7 @@ function CodexChatWidget({
                         <Tooltip>
                             <TooltipTrigger asChild>
                                 <Button
+                                    ref={sessionsTriggerRef}
                                     type='button'
                                     variant='ghost'
                                     size='icon'
@@ -3833,7 +3897,7 @@ function CodexChatWidget({
                                     onClick={toggleSessions}
                                     aria-label='Show Codex sessions'
                                     aria-expanded={sessionsOpen}>
-                                    <PanelRight className='h-4 w-4' />
+                                    <History className='h-4 w-4' />
                                 </Button>
                             </TooltipTrigger>
                             <TooltipContent>Sessions</TooltipContent>
@@ -3873,47 +3937,17 @@ function CodexChatWidget({
             </header>
 
             {sessionsOpen && (
-                <div
-                    role='region'
-                    aria-label='Codex sessions'
-                    className='docs-chat-sessions absolute right-4 top-16 z-10 max-h-[50vh] w-[calc(100%_-_2rem)] max-w-[26rem] overflow-y-auto overflow-x-hidden rounded-2xl border bg-background p-3 shadow-lg'>
-                    <div className='mb-2 flex items-center justify-between gap-2'>
-                        <span className='text-sm font-medium'>Sessions</span>
-                        <Button
-                            type='button'
-                            variant='ghost'
-                            size='sm'
-                            className='h-7 px-2 text-xs'
-                            disabled={sessionsLoading}
-                            onClick={() => void loadSessions()}>
-                            Refresh
-                        </Button>
-                    </div>
-                    {sessionsLoading ? (
-                        <div className='py-3 text-center text-sm text-muted-foreground'>Loading...</div>
-                    ) : sessions.length === 0 ? (
-                        <div className='py-3 text-center text-sm text-muted-foreground'>No sessions</div>
-                    ) : (
-                        <div className='space-y-1'>
-                            {sessions.map((session) => (
-                                <button
-                                    key={session.id}
-                                    type='button'
-                                    className={cn(
-                                        "flex w-full min-w-0 flex-col rounded-xl px-3 py-2 text-left text-sm transition-colors hover:bg-muted",
-                                        session.id === status.threadId && "bg-muted",
-                                    )}
-                                    disabled={status.running || sessionLoading}
-                                    onClick={() => void resumeSession(session.id)}>
-                                    <span className='truncate font-medium'>{session.name}</span>
-                                    <span className='truncate text-xs text-muted-foreground'>
-                                        {formatCodexSessionTimestamp(session.updatedAt)} · {session.status}
-                                    </span>
-                                </button>
-                            ))}
-                        </div>
-                    )}
-                </div>
+                <CodexSessionsPanel
+                    busy={status.running || sessionLoading}
+                    currentThreadId={status.threadId}
+                    loading={sessionsLoading}
+                    onClose={() => setSessionsOpen(false)}
+                    onDelete={deleteSession}
+                    onRefresh={() => void loadSessions()}
+                    onResume={(threadId) => void resumeSession(threadId)}
+                    sessions={sessions}
+                    triggerRef={sessionsTriggerRef}
+                />
             )}
 
             <div className='min-h-0 flex-1 overflow-y-auto'>
@@ -9369,16 +9403,6 @@ function formatCodexEffortLabel(value: string) {
     return value
         .replace(/[_-]+/g, " ")
         .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function formatCodexSessionTimestamp(value: number) {
-    if (!value) return "Unknown time";
-    return new Date(value * 1000).toLocaleString([], {
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        month: "short",
-    });
 }
 
 type ChatMarkdownRenderer = {
