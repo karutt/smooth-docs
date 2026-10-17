@@ -11,6 +11,20 @@ export type CodexChatMessageUpdate = {
   append?: boolean;
 };
 
+export type CodexContextUsage = {
+  usedTokens: number;
+  contextWindow: number;
+};
+
+export function normalizeCodexContextUsage(value: unknown): CodexContextUsage | null {
+  const usage = object(value);
+  const usedTokens = object(usage?.last)?.totalTokens;
+  const contextWindow = usage?.modelContextWindow;
+  if (typeof usedTokens !== "number" || !Number.isFinite(usedTokens) || usedTokens < 0
+    || typeof contextWindow !== "number" || !Number.isFinite(contextWindow) || contextWindow <= 0) return null;
+  return { usedTokens, contextWindow };
+}
+
 type CodexItem = Record<string, unknown>;
 
 function object(value: unknown): CodexItem | null {

@@ -179,13 +179,13 @@ a,
     background-size: 64px 64px;
 }
 
-#root header {
+#root .docs-site-header {
     border-bottom: 0;
     background: transparent;
     color: var(--raycast-text);
 }
 
-#root header > div {
+#root .docs-site-header > div {
     max-width: 1204px;
     height: 60px;
     margin: 0 auto;
@@ -197,33 +197,33 @@ a,
     backdrop-filter: blur(20px);
 }
 
-#root header button,
-#root header [role="button"],
-#root header [data-radix-collection-item] {
+#root .docs-site-header button,
+#root .docs-site-header [role="button"],
+#root .docs-site-header [data-radix-collection-item] {
     border-color: transparent;
     border-radius: var(--raycast-radius-sm);
     color: var(--raycast-text-muted);
     letter-spacing: 0.2px;
 }
 
-#root header button:hover,
-#root header [role="button"]:hover {
+#root .docs-site-header button:hover,
+#root .docs-site-header [role="button"]:hover {
     background: var(--raycast-bg-hover);
     color: var(--raycast-text);
 }
 
-#root header button[aria-label*="theme"],
-#root header button[aria-label*="navigation"],
-#root header button[aria-label*="Toggle"] {
+#root .docs-site-header button[aria-label*="theme"],
+#root .docs-site-header button[aria-label*="navigation"],
+#root .docs-site-header button[aria-label*="Toggle"] {
     width: 36px;
     height: 36px;
     border: 0;
     background: transparent;
 }
 
-#root header .bg-background,
-#root header .bg-popover,
-#root header .bg-card,
+#root .docs-site-header .bg-background,
+#root .docs-site-header .bg-popover,
+#root .docs-site-header .bg-card,
 [data-radix-popper-content-wrapper] > * {
     border-color: var(--raycast-border);
     background: var(--raycast-bg-panel);
@@ -231,6 +231,23 @@ a,
     box-shadow:
         0 10px 38px -10px rgb(14 18 22),
         0 10px 20px -15px rgb(14 18 22 / 80%);
+}
+
+.docs-chat-header {
+    border-bottom: 1px solid var(--raycast-border-strong);
+    background: var(--raycast-bg-panel);
+    color: var(--raycast-text);
+}
+
+.docs-chat-header button,
+.docs-chat-close-button {
+    color: var(--raycast-text-soft);
+}
+
+.docs-chat-header button:hover,
+.docs-chat-close-button:hover {
+    background: rgb(255 255 255 / 8%);
+    color: var(--raycast-text);
 }
 
 [data-sidebar="sidebar"],
@@ -287,7 +304,7 @@ main,
     min-height: 30px;
     border: 1px solid transparent;
     border-radius: var(--raycast-radius-sm);
-    color: var(--raycast-text-muted);
+    color: color-mix(in srgb, var(--raycast-text-muted) 80%, var(--raycast-text));
     font-size: 13px;
     font-weight: 500;
     letter-spacing: 0.2px;
@@ -1101,7 +1118,7 @@ button.bg-primary {
 }
 
 @media (max-width: 768px) {
-    #root header > div {
+    #root .docs-site-header > div {
         height: 64px;
         margin: 0 8px;
         padding: 12px 14px;

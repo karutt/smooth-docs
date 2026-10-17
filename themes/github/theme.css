@@ -206,7 +206,7 @@ main {
     min-height: 30px;
     border: 1px solid transparent;
     border-radius: var(--github-radius);
-    color: var(--github-fg-muted);
+    color: color-mix(in srgb, var(--github-fg-muted) 80%, var(--github-fg-default));
     font-size: 14px;
     font-weight: 400;
 }

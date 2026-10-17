@@ -22,14 +22,15 @@ Command.displayName = CommandPrimitive.displayName;
 interface CommandDialogProps
   extends React.ComponentPropsWithoutRef<typeof Dialog> {
   title?: string;
+  commandProps?: React.ComponentPropsWithoutRef<typeof Command>;
 }
 
-function CommandDialog({ children, title = "Command menu", ...props }: CommandDialogProps) {
+function CommandDialog({ children, title = "Command menu", commandProps, ...props }: CommandDialogProps) {
   return (
     <Dialog {...props}>
       <DialogContent className="docs-command-dialog max-h-[calc(100vh-5rem)] overflow-hidden p-0 shadow-lg">
         <DialogTitle className="sr-only">{title}</DialogTitle>
-        <Command>{children}</Command>
+        <Command {...commandProps}>{children}</Command>
       </DialogContent>
     </Dialog>
   );

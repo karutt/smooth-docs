@@ -278,7 +278,7 @@ main {
   min-height: 28px;
   border: 1px solid transparent;
   border-radius: 6px;
-  color: var(--linear-text-tertiary);
+  color: color-mix(in srgb, var(--linear-text-tertiary) 80%, var(--linear-text-primary));
   font-size: 13px;
   font-weight: 400;
   letter-spacing: 0;

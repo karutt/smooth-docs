@@ -1,8 +1,36 @@
 diff --git a/dist/index.js b/dist/index.js
-index e7e087bcb6f29d0d8f36cd558e0183bc0f162fcb..df93c10469a110f70db00df5e8626823d54de366 100644
 --- a/dist/index.js
 +++ b/dist/index.js
-@@ -7352,7 +7352,9 @@ function layoutSequenceDiagram(diagram, _options = {}) {
+@@ -3698,6 +3698,7 @@
+         type: blockType,
+         label,
+         startIndex: diagram.messages.length,
++        startNoteIndex: diagram.notes.length,
+         dividers: []
+       });
+       continue;
+@@ -3718,7 +3719,9 @@
+         type: completed.type,
+         label: completed.label,
+         startIndex: completed.startIndex,
+-        endIndex: Math.max(diagram.messages.length - 1, completed.startIndex),
++        endIndex: diagram.messages.length - 1,
++        startNoteIndex: completed.startNoteIndex,
++        endNoteIndex: diagram.notes.length,
+         dividers: completed.dividers
+       });
+       continue;
+@@ -7320,6 +7323,8 @@
+   notePadX: 12,
+   notePadY: 6,
+-  noteGap: 10
++  noteGap: 10,
++  noteGapTop: 24,
++  noteGapBottom: 16
+ };
+ function layoutSequenceDiagram(diagram, _options = {}) {
+   if (diagram.actors.length === 0) {
+@@ -7352,7 +7357,9 @@
      width: actorWidths[i],
      height: SEQ.actorHeight
    }));
@@ -13,3 +41,146 @@ index e7e087bcb6f29d0d8f36cd558e0183bc0f162fcb..df93c10469a110f70db00df5e8626823
    const messages = [];
    const extraSpaceBefore = /* @__PURE__ */ new Map();
    for (const block of diagram.blocks) {
+@@ -7364,12 +7371,55 @@
+     }
+   }
+   const notesByAfterIndex = /* @__PURE__ */ new Map();
+-  for (const note of diagram.notes) {
++  for (const [index, note] of diagram.notes.entries()) {
+     const list = notesByAfterIndex.get(note.afterIndex) ?? [];
+-    list.push(note);
++    list.push({ ...note, index });
+     notesByAfterIndex.set(note.afterIndex, list);
+   }
+   const positionedNotes = [];
++  function positionNotes(afterIndex, startY) {
++    const notesForMsg = notesByAfterIndex.get(afterIndex) ?? [];
++    let noteY = startY;
++    for (const note of notesForMsg) {
++      // A note at the start of a block belongs below that block's header,
++      // rather than below the last message of the preceding block.
++      if (diagram.blocks.some((block) => block.endNoteIndex === note.index && block.endIndex === afterIndex)) {
++        noteY = Math.max(noteY, messageY);
++      }
++      const startingBlocks = diagram.blocks.filter((block) => block.startNoteIndex === note.index && block.startIndex === afterIndex + 1);
++      if (startingBlocks.length > 0) {
++        noteY = Math.max(noteY, messageY + (extraSpaceBefore.get(afterIndex + 1) ?? SEQ.blockHeaderExtra));
++        if (startingBlocks.some((block) => block.endIndex >= block.startIndex)) {
++          extraSpaceBefore.delete(afterIndex + 1);
++        }
++      }
++      const metrics = measureMultilineText(note.text, FONT_SIZES.edgeLabel, FONT_WEIGHTS.edgeLabel);
++      let noteW = Math.max(SEQ.noteWidth, metrics.width + SEQ.notePadX * 2);
++      const noteH = metrics.height + SEQ.notePadY * 2;
++      const firstActorIdx = actorIndex.get(note.actorIds[0] ?? "") ?? 0;
++      let noteX;
++      if (note.position === "left") {
++        noteX = actorCenterX[firstActorIdx] - actorWidths[firstActorIdx] / 2 - noteW - SEQ.noteGap;
++      } else if (note.position === "right") {
++        noteX = actorCenterX[firstActorIdx] + actorWidths[firstActorIdx] / 2 + SEQ.noteGap;
++      } else {
++        const spanningActorIndices = [firstActorIdx, ...note.actorIds.slice(1).map((id) => actorIndex.get(id) ?? firstActorIdx)];
++        const spanLeft = Math.min(...spanningActorIndices.map((i) => actorCenterX[i] - actorWidths[i] / 2));
++        const spanRight = Math.max(...spanningActorIndices.map((i) => actorCenterX[i] + actorWidths[i] / 2));
++        noteW = Math.max(noteW, spanRight - spanLeft);
++        noteX = (spanLeft + spanRight - noteW) / 2;
++      }
++      positionedNotes.push({
++        text: note.text, x: noteX, y: noteY, width: noteW, height: noteH,
++        position: note.position, actors: note.actorIds, index: note.index
++      });
++      noteY += noteH + SEQ.noteGapBottom;
++      messageY = Math.max(messageY, noteY + SEQ.messageRowHeight / 2);
++    }
++  }
++  // Notes preceding the first message have afterIndex -1. Also handles
++  // diagrams consisting only of participants and notes.
++  positionNotes(-1, messageY);
+   const activationStacks = /* @__PURE__ */ new Map();
+   const activations = [];
+   const nestingOffset = 4;
+@@ -7417,43 +7467,7 @@
+       }
+     }
+     messageY += isSelf ? SEQ.selfMessageHeight + SEQ.messageRowHeight : SEQ.messageRowHeight;
+-    const notesForMsg = notesByAfterIndex.get(msgIdx);
+-    if (notesForMsg && notesForMsg.length > 0) {
+-      const selfLoopExtra = isSelf ? SEQ.selfMessageHeight : 0;
+-      let noteY = messages[msgIdx].y + selfLoopExtra + 8;
+-      for (const note of notesForMsg) {
+-        const noteW = Math.max(
+-          SEQ.noteWidth,
+-          estimateTextWidth(note.text, FONT_SIZES.edgeLabel, FONT_WEIGHTS.edgeLabel) + SEQ.notePadX * 2
+-        );
+-        const noteH = FONT_SIZES.edgeLabel + SEQ.notePadY * 2;
+-        const firstActorIdx = actorIndex.get(note.actorIds[0] ?? "") ?? 0;
+-        let noteX;
+-        if (note.position === "left") {
+-          noteX = actorCenterX[firstActorIdx] - actorWidths[firstActorIdx] / 2 - noteW - SEQ.noteGap;
+-        } else if (note.position === "right") {
+-          noteX = actorCenterX[firstActorIdx] + actorWidths[firstActorIdx] / 2 + SEQ.noteGap;
+-        } else {
+-          if (note.actorIds.length > 1) {
+-            const lastActorIdx = actorIndex.get(note.actorIds[note.actorIds.length - 1] ?? "") ?? firstActorIdx;
+-            noteX = (actorCenterX[firstActorIdx] + actorCenterX[lastActorIdx]) / 2 - noteW / 2;
+-          } else {
+-            noteX = actorCenterX[firstActorIdx] - noteW / 2;
+-          }
+-        }
+-        positionedNotes.push({
+-          text: note.text,
+-          x: noteX,
+-          y: noteY,
+-          width: noteW,
+-          height: noteH,
+-          position: note.position,
+-          actors: note.actorIds
+-        });
+-        noteY += noteH + 4;
+-      }
+-      messageY = Math.max(messageY, noteY + SEQ.messageRowHeight / 2);
+-    }
++    positionNotes(msgIdx, messages[msgIdx].y + (isSelf ? SEQ.selfMessageHeight : 0) + SEQ.noteGapTop);
+   }
+   for (const [actorId, stack] of activationStacks) {
+     for (const { startY, depth } of stack) {
+@@ -7469,10 +7483,14 @@
+     }
+   }
+   const blocks = diagram.blocks.map((block) => {
+-    const startMsg = messages[block.startIndex];
+-    const endMsg = messages[block.endIndex];
+-    const blockTop = (startMsg?.y ?? messageY) - SEQ.blockPadTop;
+-    const blockBottom = (endMsg?.y ?? messageY) + SEQ.blockPadBottom + 12;
++    const hasMessages = block.endIndex >= block.startIndex;
++    const startMsg = hasMessages ? messages[block.startIndex] : undefined;
++    const endMsg = hasMessages ? messages[block.endIndex] : undefined;
++    const blockNotes = positionedNotes.filter((note) => note.index >= block.startNoteIndex && note.index < block.endNoteIndex);
++    const firstY = Math.min(startMsg?.y ?? Infinity, ...blockNotes.map((note) => note.y));
++    const blockTop = (Number.isFinite(firstY) ? firstY : messageY) - SEQ.blockPadTop;
++    const blockBottom = Math.max((endMsg?.y ?? (Number.isFinite(firstY) ? firstY : messageY)) + SEQ.blockPadBottom + 12,
++      ...blockNotes.map((note) => note.y + note.height + SEQ.blockPadBottom));
+     const involvedActors = /* @__PURE__ */ new Set();
+     for (let mi = block.startIndex; mi <= block.endIndex; mi++) {
+       const m = diagram.messages[mi];
+@@ -7481,13 +7499,18 @@
+         involvedActors.add(actorIndex.get(m.to) ?? 0);
+       }
+     }
++    for (const note of blockNotes) {
++      for (const id of note.actors) involvedActors.add(actorIndex.get(id) ?? 0);
++    }
+     if (involvedActors.size === 0) {
+       for (let ai = 0; ai < diagram.actors.length; ai++) involvedActors.add(ai);
+     }
+     const minIdx = Math.min(...involvedActors);
+     const maxIdx = Math.max(...involvedActors);
+-    const blockLeft = actorCenterX[minIdx] - actorWidths[minIdx] / 2 - SEQ.blockPadX;
+-    const blockRight = actorCenterX[maxIdx] + actorWidths[maxIdx] / 2 + SEQ.blockPadX;
++    const blockLeft = Math.min(actorCenterX[minIdx] - actorWidths[minIdx] / 2 - SEQ.blockPadX,
++      ...blockNotes.map((note) => note.x - SEQ.blockPadX));
++    const blockRight = Math.max(actorCenterX[maxIdx] + actorWidths[maxIdx] / 2 + SEQ.blockPadX,
++      ...blockNotes.map((note) => note.x + note.width + SEQ.blockPadX));
+     const dividers = block.dividers.map((d) => {
+       const msg = messages[d.index];
+       const msgY = msg?.y ?? messageY;

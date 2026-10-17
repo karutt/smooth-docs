@@ -1,3 +1,6 @@
+import type { CompiledFlow } from "./docs-flow/types";
+export type * from "./docs-flow/types";
+
 export type SiteKey = string;
 
 export type NavItem = {
@@ -19,6 +22,7 @@ export type DocPage = {
   markdown: string;
   html: string;
   text: string;
+  flows?: Record<string, CompiledFlow>;
   createdAt?: string;
   updatedAt?: string;
   kind?: "page" | "folder" | "inbox";

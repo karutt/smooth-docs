@@ -13,11 +13,19 @@ import {
   loadSmoothDocsConfig,
   updateSmoothDocsTheme,
 } from "./scripts/config.mjs";
+import {
+  createFlowDevApiHandler,
+  FLOW_DEV_API_REQUEST_LIMIT,
+  type FlowDevApiRequest,
+} from "./scripts/docs-flow/dev-api.mjs";
 import type { AllDocsData } from "./src/types";
 import { getCodexAppResourceDirs, resolveCodexCommand } from "./scripts/codex-command";
+import { createManagedCodexBridge, stopCodexProcess } from "./scripts/codex-process";
 import {
   CodexMessageStream,
   extractCodexThreadMessages,
+  normalizeCodexContextUsage,
+  type CodexContextUsage,
   type CodexChatMessage,
   type CodexChatMessageUpdate,
 } from "./src/codex-chat";
@@ -74,6 +82,7 @@ type CodexChatStatus = {
   lastError: string;
   selectedEffort: string | null;
   selectedModel: string | null;
+  contextUsage: CodexContextUsage | null;
 };
 
 type CodexSessionResumeResult = {
@@ -273,6 +282,9 @@ function docsContentPlugin(): Plugin {
 
   return {
     name: "smooth-docs-content",
+    async closeBundle() {
+      await codexChatBridge.dispose();
+    },
     buildStart() {
       generateDocsContent();
     },
@@ -280,6 +292,7 @@ function docsContentPlugin(): Plugin {
       if (isGeneratedFile(context.file)) return [];
     },
     configureServer(server) {
+      server.httpServer?.once("close", () => codexChatBridge.dispose());
       for (const root of watchedRoots) {
         server.watcher.add(root);
       }
@@ -309,6 +322,22 @@ function docsContentPlugin(): Plugin {
 
         folderCache.clear();
       };
+      const flowDevApiHandler = createFlowDevApiHandler({
+        docsRoot,
+        siteKey: docsConfig.siteKey,
+        protocol: "http:",
+        regenerate: generateDocsContentForServer,
+        markSilentDocsFile(file) {
+          silentDocsFiles.add(path.resolve(file));
+        },
+        broadcast(content) {
+          server.ws.send("smooth-docs:content-update", {
+            docsDataBySite: content.docsDataBySite as AllDocsData,
+            generatedAt: content.generatedAt,
+            refreshThemeStylesheet: false,
+          } satisfies DocsContentUpdatePayload);
+        },
+      });
       const regenerate = (file: string) => {
         if (!isDocsFile(file)) return;
         if (silentDocsFiles.delete(path.resolve(file))) return;
@@ -366,6 +395,17 @@ function docsContentPlugin(): Plugin {
       });
 
       server.middlewares.use((req, res, next) => {
+        if (req.url?.startsWith("/__smooth-docs/flow/")) {
+          void handleFlowDevApiRequest(req, res, flowDevApiHandler).catch(() => {
+            sendJson(res, 500, {
+              code: "FLOW_INTERNAL_ERROR",
+              message: "The flow request could not be completed.",
+              diagnostics: [],
+            });
+          });
+          return;
+        }
+
         if (!req.url?.startsWith("/__smooth-docs/")) {
           next();
           return;
@@ -384,6 +424,39 @@ function docsContentPlugin(): Plugin {
       });
     },
   };
+}
+
+async function handleFlowDevApiRequest(
+  req: IncomingMessage,
+  res: ServerResponse,
+  handler: (request: FlowDevApiRequest) => Promise<{ status: number; body: unknown }>,
+) {
+  const body = req.method === "GET" ? undefined : await readBoundedRequestBody(req);
+  const protocol = (req.socket as { encrypted?: boolean }).encrypted ? "https:" : "http:";
+  const response = await handler({
+    method: req.method,
+    url: req.url,
+    protocol,
+    headers: req.headers,
+    body,
+  });
+  sendJson(res, response.status, response.body);
+}
+
+async function readBoundedRequestBody(req: IncomingMessage) {
+  const chunks: Buffer[] = [];
+  let retainedBytes = 0;
+
+  for await (const value of req) {
+    const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value);
+    if (retainedBytes > FLOW_DEV_API_REQUEST_LIMIT) continue;
+    const remaining = FLOW_DEV_API_REQUEST_LIMIT + 1 - retainedBytes;
+    const retained = chunk.subarray(0, remaining);
+    chunks.push(retained);
+    retainedBytes += retained.byteLength;
+  }
+
+  return Buffer.concat(chunks, retainedBytes);
 }
 
 async function serveGeneratedPublicFile(req: IncomingMessage, res: ServerResponse) {
@@ -434,6 +507,7 @@ function decodeUrlPathname(pathname: string) {
 
 class CodexChatBridge {
   private messageStream = new CodexMessageStream();
+  private contextUsageByThread = new Map<string, CodexContextUsage>();
   private activeTurnId: string | null = null;
   private child: ChildProcessWithoutNullStreams | null = null;
   private events = new EventEmitter();
@@ -452,13 +526,15 @@ class CodexChatBridge {
   >();
   private startPromise: Promise<void> | null = null;
   private stderrTail = "";
-  private suppressNextCloseError = false;
+  private disposed = false;
+  private shutdown: Promise<void> = Promise.resolve();
   private threadId: string | null = null;
 
   constructor(
     private options: {
       cwd: string;
       serviceName: string;
+      previousShutdown: Promise<void>;
     },
   ) {}
 
@@ -470,12 +546,26 @@ class CodexChatBridge {
       lastError: this.lastError,
       selectedEffort: this.selectedEffort,
       selectedModel: this.selectedModel,
+      contextUsage: this.threadId ? this.contextUsageByThread.get(this.threadId) ?? null : null,
     };
   }
 
   onEvent(listener: (event: CodexChatEvent) => void) {
     this.events.on("event", listener);
     return () => this.events.off("event", listener);
+  }
+
+  dispose() {
+    if (this.disposed) return this.shutdown;
+    this.disposed = true;
+    const child = this.child;
+    this.child = null;
+    this.initialized = false;
+    this.threadId = null;
+    this.activeTurnId = null;
+    this.failAll(new Error("Codex app-server closed"));
+    this.shutdown = Promise.all([this.options.previousShutdown, stopCodexProcess(child)]).then(() => {});
+    return this.shutdown;
   }
 
   async sendMessage(request: CodexChatMessageRequest) {
@@ -659,6 +749,8 @@ class CodexChatBridge {
   }
 
   private async ensureInitialized() {
+    await this.options.previousShutdown;
+    if (this.disposed) throw new Error("Codex connection was restarted. Please try again.");
     if (this.child && this.initialized) return;
 
     if (!this.startPromise) {
@@ -746,36 +838,36 @@ class CodexChatBridge {
 
     this.lastError = "";
     this.stderrTail = "";
-    this.suppressNextCloseError = false;
-    this.child = spawn(command, ["app-server"], {
+    const child = spawn(command, ["app-server"], {
       cwd: this.options.cwd,
       env: getCodexProcessEnv(command),
       stdio: ["pipe", "pipe", "pipe"],
     });
+    this.child = child;
 
-    const stdout = readline.createInterface({ input: this.child.stdout });
-    stdout.on("line", (line) => this.handleLine(line));
+    const stdout = readline.createInterface({ input: child.stdout });
+    stdout.on("line", (line) => {
+      if (this.child === child) this.handleLine(line);
+    });
 
-    this.child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (this.child !== child) return;
       this.stderrTail = `${this.stderrTail}${chunk.toString("utf8")}`.slice(-4000);
     });
 
-    this.child.on("error", (error) => {
+    child.on("error", (error) => {
+      if (this.child !== child) return;
       this.child = null;
       this.initialized = false;
       this.threadId = null;
       this.activeTurnId = null;
-      this.suppressNextCloseError = true;
       this.failAll(error);
       this.lastError = error.message;
       this.broadcast({ type: "error", message: error.message, status: this.getStatus() });
     });
 
-    this.child.on("close", (code, signal) => {
-      if (this.suppressNextCloseError) {
-        this.suppressNextCloseError = false;
-        return;
-      }
+    child.on("close", (code, signal) => {
+      if (this.child !== child) return;
 
       const detail = this.stderrTail.trim();
       const message = detail
@@ -825,6 +917,17 @@ class CodexChatBridge {
   }
 
   private handleNotification(method: string, params: Record<string, unknown>) {
+    if (method === "thread/tokenUsage/updated") {
+      const threadId = getString(params.threadId);
+      const usage = normalizeCodexContextUsage(params.tokenUsage);
+      if (threadId) {
+        if (usage) this.contextUsageByThread.set(threadId, usage);
+        else this.contextUsageByThread.delete(threadId);
+        if (threadId === this.threadId) this.broadcast({ type: "status", status: this.getStatus() });
+      }
+      return;
+    }
+
     if (typeof params.threadId === "string" && this.threadId && params.threadId !== this.threadId) return;
 
     if (method === "turn/started") {
@@ -898,10 +1001,9 @@ class CodexChatBridge {
   }
 }
 
-const codexChatBridge = new CodexChatBridge({
-  cwd: docsConfig.projectDir,
-  serviceName: "smooth_docs_kit",
-});
+const codexChatBridge = createManagedCodexBridge(docsConfig.projectDir, (previousShutdown) =>
+  new CodexChatBridge({ cwd: docsConfig.projectDir, serviceName: "smooth_docs_kit", previousShutdown }),
+);
 
 function getCodexProcessEnv(command: string) {
   const commandDir = path.dirname(command);

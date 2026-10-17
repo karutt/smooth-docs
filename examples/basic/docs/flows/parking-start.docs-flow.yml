@@ -1,0 +1,74 @@
+version: 1
+id: reusable-parking-start
+kind: workflow
+title: Reusable parking start
+description: A shared parking-session workflow rendered from two Markdown pages.
+direction: right
+lanes:
+  - id: driver
+    label: Driver
+  - id: backend
+    label: Backend
+  - id: provider
+    label: Payment provider
+nodes:
+  - id: scan
+    type: action
+    label: Scan parking QR code
+    lane: driver
+  - id: validate
+    type: decision
+    label: Validate parking code
+    lane: backend
+  - id: create-session
+    type: service
+    label: Create parking session
+    lane: backend
+  - id: authorize
+    type: external
+    label: Authorize payment method
+    lane: provider
+  - id: reject
+    type: note
+    label: Explain invalid parking code
+    lane: driver
+edges:
+  - id: submit-code
+    from: scan
+    to: validate
+    label: Submit code
+  - id: valid-code
+    from: validate
+    to: create-session
+    label: Valid
+  - id: authorize-payment
+    from: create-session
+    to: authorize
+    label: Authorize
+    style: async
+  - id: invalid-code
+    from: validate
+    to: reject
+    label: Invalid
+    style: error
+stories:
+  - id: normal-path
+    label: Normal path
+    description: A valid code starts a paid parking session.
+    steps:
+      - node: scan
+      - edge: submit-code
+      - node: validate
+      - edge: valid-code
+      - node: create-session
+      - edge: authorize-payment
+      - node: authorize
+  - id: error-path
+    label: Error path
+    description: An invalid code returns an actionable explanation.
+    steps:
+      - node: scan
+      - edge: submit-code
+      - node: validate
+      - edge: invalid-code
+      - node: reject
