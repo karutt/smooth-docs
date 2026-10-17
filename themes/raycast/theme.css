@@ -31,9 +31,9 @@ html.dark {
     --raycast-bg-card-strong: #1b1c1e;
     --raycast-bg-hover: rgb(24 25 26 / 72%);
     --raycast-bg-selected: rgb(255 99 99 / 15%);
-    --raycast-border: rgb(255 255 255 / 6%);
-    --raycast-border-strong: rgb(255 255 255 / 10%);
-    --raycast-border-hover: rgb(255 255 255 / 15%);
+    --raycast-border: rgb(255 255 255 / 4.5%);
+    --raycast-border-strong: rgb(255 255 255 / 7%);
+    --raycast-border-hover: rgb(255 255 255 / 12%);
     --raycast-text: #ffffff;
     --raycast-text-soft: rgb(255 255 255 / 85%);
     --raycast-text-muted: #9c9c9d;
@@ -49,7 +49,7 @@ html.dark {
         rgb(17 18 20 / 75%) 4.87%,
         rgb(12 13 15 / 90%) 75.88%
     );
-    --raycast-nav-shadow: inset 0 1px 1px rgb(255 255 255 / 15%);
+    --raycast-nav-shadow: inset 0 1px 1px rgb(255 255 255 / 8%);
     --raycast-button-bg: #e6e6e6;
     --raycast-button-fg: #2f3031;
     --raycast-button-shadow:
@@ -75,7 +75,7 @@ html.dark {
     --accent-foreground: 0 0% 100%;
     --destructive: 0 100% 69.4%;
     --destructive-foreground: 0 0% 100%;
-    --border: 195 5% 15%;
+    --border: 220 6.67% 8.82%;
     --input: 0 0% 100% / 5%;
     --ring: 0 100% 69.4%;
     --radius: 0.5rem;
@@ -85,7 +85,7 @@ html.dark {
     --sidebar-primary-foreground: 0 0% 100%;
     --sidebar-accent: 0 100% 69.4% / 15%;
     --sidebar-accent-foreground: 0 0% 100%;
-    --sidebar-border: 0 0% 100% / 6%;
+    --sidebar-border: 220 6.67% 8.82%;
     --sidebar-ring: 0 100% 69.4%;
     --docs-mermaid-background: 210 5% 10%;
 }
@@ -264,7 +264,7 @@ main,
 [data-sidebar="sidebar"] {
     border-color: var(--raycast-border);
     background: linear-gradient(180deg, rgb(17 18 20 / 70%), rgb(7 8 10 / 96%)), var(--raycast-bg);
-    box-shadow: inset -1px 0 var(--raycast-border);
+    box-shadow: none;
     color: var(--raycast-text-muted);
 }
 
@@ -364,15 +364,16 @@ main,
         0 0 24px rgb(255 99 99 / 22%);
 }
 
-.docs-sidebar-resizer::after,
-.docs-pin-resizer::after {
-    background: var(--raycast-border);
+html .docs-sidebar-resizer::after,
+html .docs-pin-resizer::after {
+    /* The panel border supplies the resting edge. */
+    background: transparent;
 }
 
-.docs-sidebar-resizer:hover::after,
-.docs-sidebar-resizer:focus-visible::after,
-.docs-pin-resizer:hover::after,
-.docs-pin-resizer:focus-visible::after {
+html .docs-sidebar-resizer:hover::after,
+html .docs-sidebar-resizer:focus-visible::after,
+html .docs-pin-resizer:hover::after,
+html .docs-pin-resizer:focus-visible::after {
     background: var(--raycast-red);
 }
 
@@ -405,7 +406,7 @@ main .space-y-4 > .bg-border,
 main .space-y-4 > [data-orientation="horizontal"],
 main [role="none"],
 .bg-border {
-    background-color: var(--raycast-border-strong);
+    background-color: var(--raycast-border);
 }
 
 [aria-label="Breadcrumb"] ol,
@@ -608,7 +609,7 @@ main [aria-label="Breadcrumb"] a:hover {
 }
 
 .docs-prose hr {
-    border-color: var(--raycast-border-strong);
+    border-color: var(--raycast-border);
 }
 
 .docs-prose img {
@@ -652,7 +653,7 @@ html .docs-prose .mermaid {
     border-color: var(--raycast-border);
     border-radius: var(--raycast-radius-md);
     background: rgb(255 255 255 / 5%);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
 }
 
 html .docs-prose figure.docs-code-block {
@@ -849,7 +850,7 @@ html .docs-prose .docs-code-block pre.hljs code {
     border-radius: var(--raycast-radius-md);
     background: rgb(255 255 255 / 3%);
     font-size: 14px;
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 5%);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
 }
 
 .docs-prose .not-prose:has(> table) {
